@@ -260,11 +260,19 @@ GLSLShader geom
         int i;
 
         for (i = 0; i < 5; i += 2) {
-            o.col = vec4(input[i].normal, 1.0);
-            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1.0);
-		    EmitVertex();
+            o.col = vec4(u_SolidColor, 1.0);
+
+            if (u_Debug) {
+                o.col = lerp(vec4(input[i].normal, 1.0), input[i].col, u_UseVertColor);
+            }
+
+            o.worldNormal = (u_ModelMatrix * vec4(input[i].normal, 0)).xyz;
+            o.worldPosition =  (u_ModelMatrix * vec4(input[i].vertex, 1)).xyz;
+
+            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1);
+            EmitVertex();
         }
-        
+
         EndPrimitive();
     }
 
@@ -437,7 +445,11 @@ GLSLShader geom
 	}
 
     void main() {
-        build();
+        if (u_OutlineScale > 0.0001) {
+            build();
+        } else {
+            passthroughTriAdj();
+        }
     }
 }
 
