@@ -22,26 +22,42 @@ uniform mat4 u_NormalMatrix : WorldInverseTranspose;
 // Camera world space position would be u_CameraMatrix[3].xyz
 uniform mat4 u_CameraMatrix : ViewInverse;
 
-uniform vec3 u_SolidColor : DIFFUSE
-<
-    string UIName = "Solid Color";
-    string UIGroup = "Fill";
-    string UIWidget = "Color";
-> = {1, 0, 0};
-
+// ---------------------------------------------
+// Silhouette Settings Group
+// ---------------------------------------------
 uniform vec3 u_OutlineColor : DIFFUSE
 <
-    string UIName = "Silhouette Color";
+    string UIName = "Color";
     string UIGroup = "Silhouette";
     string UIWidget = "Color";
 > = {1, 1, 1};
 
 uniform float u_OutlineScale
 <
-    string UIName = "Silhouette Scale";
+    string UIName = "Scale";
     string UIGroup = "Silhouette";
 > = 1.0;
 
+// ---------------------------------------------
+// Fill Settings Group
+// ---------------------------------------------
+uniform vec3 u_SolidColor : DIFFUSE
+<
+    string UIName = "Diffuse Color";
+    string UIGroup = "Fill";
+    string UIWidget = "Color";
+> = {1, 0, 0};
+
+uniform vec3 u_ShadedColor : DIFFUSE
+<
+    string UIName = "Shaded Color";
+    string UIGroup = "Fill";
+    string UIWidget = "Color";
+> = {0.5, 0, 0};
+
+// ---------------------------------------------
+// Debug Group
+// ---------------------------------------------
 uniform bool u_Debug
 <
     string UIName = "Debug Mode";
@@ -60,6 +76,105 @@ uniform bool u_UseVertColor
     string UIGroup = "Debug";
 > = false;
 
+// ---------------------------------------------
+// Light 0 Group
+// ---------------------------------------------
+// This value is controlled by Maya to tell us if a light should be calculated
+// Unfortunately it SUPER doesn't work. Stays true even when we turn off lighting
+// in the viewport (yet other values, like LIGHTCOLOR, reset)
+uniform bool light0Enable : LIGHTENABLE
+<
+	string Object = "Light 0";	// UI Group for lights, auto-closed
+	string UIName = "Enable Light 0";
+	int UIOrder = 20;
+> = false;
+
+// Matches LightParameterInfo::ELightType
+// spot = 2, point = 3, directional = 4, ambient = 5,
+uniform int light0Type : LIGHTTYPE
+<
+	string Object = "Light 0";
+	string UIName = "Light 0 Type";
+	string UIFieldNames ="None:Default:Spot:Point:Directional:Ambient";
+	int UIOrder = 21;
+	float UIMin = 0;
+	float UIMax = 5;
+	float UIStep = 1;
+> = 3; // Defaults to Point
+
+uniform vec3 light0Pos : POSITION 
+< 
+	string Object = "Light 0";
+	string UIName = "Light 0 Position"; 
+	string Space = "World"; 
+	int UIOrder = 22;
+> = {100.0f, 100.0f, 100.0f}; 
+
+uniform vec3 light0Color : LIGHTCOLOR 
+<
+	string Object = "Light 0";
+	string UIName = "Light 0 Color"; 
+	string UIWidget = "Color"; 
+	int UIOrder = 23;
+> = { 1.0f, 1.0f, 1.0f};
+
+uniform float light0Intensity : LIGHTINTENSITY 
+<
+	string Object = "Light 0";
+	string UIName = "Light 0 Intensity"; 
+	float UIMin = 0.0;
+	float UIMax = 10;
+	float UIStep = 0.01;
+	int UIOrder = 24;
+> = { 1.0f };
+
+uniform vec3 light0Dir : DIRECTION 
+< 
+	string Object = "Light 0";
+	string UIName = "Light 0 Direction"; 
+	string Space = "World"; 
+	int UIOrder = 25;
+> = {100.0f, 100.0f, 100.0f}; 
+
+// In radians
+uniform float light0ConeAngle : HOTSPOT 
+<
+	string Object = "Light 0";
+	string UIName = "Light 0 Cone Angle"; 
+	float UIMin = 0;
+	float UIMax = PI/2;
+	int UIOrder = 26;
+> = { 0.46f };
+
+// In radians. Should be HIGHER then cone angle or lit area will invert
+uniform float light0FallOff : FALLOFF
+<
+	string Object = "Light 0";
+	string UIName = "Light 0 Penumbra Angle"; 
+	float UIMin = 0;
+	float UIMax = PI/2;
+	int UIOrder = 27;
+> = { 0.7f };
+
+uniform float light0Atten : DECAYRATE
+<
+	string Object = "Light 0";
+	string UIName = "Light 0 Decay";
+	float UIMin = 0.0;
+	float UIMax = 20.0;
+	float UIStep = 0.01;
+	int UIOrder = 28;
+> = {0.0};
+
+uniform mat4 light0Matrix : SHADOWMAPMATRIX		
+< 
+	string Object = "Light 0";
+	string UIWidget = "None"; 
+>;
+
+// ---------------------------------------------
+// Shader inputs/outputs
+// ---------------------------------------------
 attribute appdata
 {
 	vec3 vertex : POSITION;
@@ -77,6 +192,8 @@ attribute v2g
 attribute g2f
 {
     // vec4 clipPosition : SV_Position;
+
+    vec3 worldPosition : TEXCOORD3;
     vec3 worldNormal : NORMAL;
 	vec4 col : COLOR0;
 };
@@ -247,6 +364,7 @@ GLSLShader geom
                 }
 
                 o.worldNormal = (u_ModelMatrix * vec4(input[i].normal, 0)).xyz;
+                o.worldPosition =  (u_ModelMatrix * vec4(input[i].vertex, 1)).xyz;
 
                 gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1);
                 EmitVertex();
@@ -325,9 +443,76 @@ GLSLShader geom
 
 GLSLShader frag
 {
+    vec3 CalculateLight(
+        // Light arguments
+        bool lightEnable, 
+        int lightType, 
+        vec3 lightPos, 
+        vec3 lightDir, 
+        vec3 lightColor,
+        float lightIntensity, 
+        // Fragment arguments
+        vec3 worldPos,
+        vec3 worldNormal,
+        vec3 eyeDir
+    ) {
+        vec3 result = vec3(0, 0, 0);
+
+        if (lightEnable) {
+            // Maya requires a light direction flip
+            // Doesn't matter for point lights though.
+            // lightDir = -lightDir;
+
+            vec3 lightVec = lightPos - worldPos;
+            vec3 L = normalize(lightVec);
+
+            // Standard Lambert diffuse
+            // vec3 diffuse = dot(worldNormal, L) * u_SolidColor;
+            // diffuse *= (lightColor * lightIntensity);
+            // result += diffuse;
+
+            // Distance cutoff, based on light intensity 
+
+            float intensity = max(0, dot(worldNormal, L) * lightIntensity);
+
+            vec3 diffuse = lerp(
+                u_ShadedColor,
+                u_SolidColor,
+                smoothstep(0.0, intensity, 0.5)
+            );
+
+            if (intensity < 0.01) {
+                result += u_ShadedColor;
+            } else if (intensity > 0.011) {
+                result += u_SolidColor;
+            } else {
+                result += vec3(1, 0, 0);
+            }
+        }
+
+        return result;
+    }
+
 	void main()
 	{
-        col = i.col;
+        // col = i.col;
+		// col = vec4(i.worldNormal, 1);
+
+        vec3 eyeDir = normalize(u_CameraMatrix[3].xyz - i.worldPosition.xyz);
+
+        vec3 light = CalculateLight(
+            light0Enable, 
+            light0Type, 
+            light0Pos,
+            light0Dir,
+            light0Color,
+            light0Intensity,
+            i.worldPosition,
+            i.worldNormal,
+            eyeDir
+        );
+
+        col = vec4(light, 1);
 	}
 }
 
