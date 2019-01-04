@@ -1,0 +1,346 @@
+#version 410
+
+#define PI 3.14
+
+/*
+    Debugging gotchas:
+
+    * If there are any faces on the mesh with > 4 sides, shader will FREAK THE FUCK OUT.
+        Geometry shader using GL_TRIANGLES_ADJACENCY can't handle that at all. Switching
+        to a straight GL_TRIANGLES and only parsing a single triangle @ a time in the geom
+        shader will still work - but it should just be fixed in the mesh.
+
+    * Maya camera clipping is screwing with the added edges hard. Need to figure out the
+        math on that (worked fine in Unity). Change near clipping plane to 1 and don't
+        zoom too far in if you have backface culling on (it'll be fine if you have culling off)
+    
+*/
+uniform mat4 u_MVPMatrix : WorldViewProjection;
+uniform mat4 u_ModelMatrix : World;
+uniform mat4 u_NormalMatrix : WorldInverseTranspose;
+
+// Camera world space position would be u_CameraMatrix[3].xyz
+uniform mat4 u_CameraMatrix : ViewInverse;
+
+uniform vec3 u_SolidColor : DIFFUSE
+<
+    string UIName = "Solid Color";
+    string UIGroup = "Fill";
+    string UIWidget = "Color";
+> = {1, 0, 0};
+
+uniform vec3 u_OutlineColor : DIFFUSE
+<
+    string UIName = "Silhouette Color";
+    string UIGroup = "Silhouette";
+    string UIWidget = "Color";
+> = {1, 1, 1};
+
+uniform float u_OutlineScale
+<
+    string UIName = "Silhouette Scale";
+    string UIGroup = "Silhouette";
+> = 1.0;
+
+uniform bool u_Debug
+<
+    string UIName = "Debug Mode";
+    string UIGroup = "Debug";
+> = false;
+
+uniform bool u_SilhouetteOnly
+<
+    string UIName = "Silhouette Only";
+    string UIGroup = "Debug";
+> = false;
+
+uniform bool u_UseVertColor
+<
+    string UIName = "Use Vertex Shader Color";
+    string UIGroup = "Debug";
+> = false;
+
+attribute appdata
+{
+	vec3 vertex : POSITION;
+	vec3 normal : NORMAL;
+};
+
+attribute v2g
+{
+	vec3 vertex : POSITION0;
+	vec3 normal : NORMAL;
+    float NdotV : TEXCOORD1;
+    vec4 col : COLOR0;
+};
+
+attribute g2f
+{
+    // vec4 clipPosition : SV_Position;
+    vec3 worldNormal : NORMAL;
+	vec4 col : COLOR0;
+};
+
+attribute ps_out
+{
+	vec4 col : COLOR0;
+};
+
+GLSLShader vert
+{
+	void main(void)
+	{
+        vec4 worldPos = u_ModelMatrix * vec4(vertex, 1.0);
+        vec4 cameraPos = u_CameraMatrix[3]; // / u_CameraMatrix[3].w;
+        vec4 cameraDir = normalize(u_CameraMatrix[2]);
+
+        // vec4 clipPos = u_MVPMatrix * vec4(vertex, 1.0);
+        // clipPos = clipPos / clipPos.w;
+
+        // Pipe local normal through to use in the geometry shader. 
+        // It'll be transformed to world normal after geo shader processes verts.
+		o.normal = normal; // (u_ModelMatrix * vec4(normal, 0)).xyz; // (u_ModelMatrix * vec4(normal, 1.0)).xyz;
+		// gl_Position = vec4(0, 0, 0, 1); // u_MVPMatrix * vec4(vertex, 1.0);
+
+		o.NdotV = dot(u_ModelMatrix * vec4(normal, 0), cameraPos - worldPos);
+        o.vertex = vertex;
+
+        // Vertex color for debugging when u_UseVertColor is true
+        float d = o.NdotV;
+        o.col = vec4(d, d, d, 1);
+	}
+}
+
+GLSLShader geom
+{
+    // Input type: 6 vertices as GL_TRIANGLES_ADJACENCY 
+    layout(triangles_adjacency) in;
+    //layout(triangles) in;
+
+    // Output type: triangle strip with up to 15 verts
+    layout(triangle_strip, max_vertices = 15) out;
+
+    vec3 xprime(float di, float dj, vec3 xi, vec3 xj) {
+        float L = abs(di) + abs(dj);
+        return (abs(dj) / L) * xi + (abs(di) / L) * xj;
+    }
+
+    // Passthrough GL_TRIANGLES
+    void passthroughTri() {
+        int i;
+
+        for (i = 0; i < 3; i ++) {
+            o.col = vec4(input[i].normal, 1.0);
+            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1.0);
+		    EmitVertex();
+        }
+        
+        EndPrimitive();
+    }
+    
+    // Passthrough GL_TRIANGLES_ADJACENCY
+    void passthroughTriAdj() {
+        int i;
+
+        for (i = 0; i < 5; i += 2) {
+            o.col = vec4(input[i].normal, 1.0);
+            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1.0);
+		    EmitVertex();
+        }
+        
+        EndPrimitive();
+    }
+
+	void build() {
+        int i;
+        float L;
+
+        float silh = 0;
+
+        int i0 = 0;
+        int i1 = 2;
+        int i2 = 4;
+
+        float d0 = input[i0].NdotV;
+        float d1 = input[i1].NdotV;
+        float d2 = input[i2].NdotV;
+
+        // Offset NdotV by 0.1 so we always have a nonzero.
+        // .: +1 for >= 0, -1 for < 0
+        float s0 = sign(d0 + 0.0001);
+        float s1 = sign(d1 + 0.0001);
+        float s2 = sign(d2 + 0.0001);
+
+        vec3 v0 = input[i0].vertex;
+        vec3 v1 = input[i1].vertex;
+        vec3 v2 = input[i2].vertex;
+
+        vec3 n0 = input[i0].normal;
+        vec3 n1 = input[i1].normal;
+        vec3 n2 = input[i2].normal;
+
+        // Start/end positions
+        vec3 xs = vec3(0,0,0);
+        vec3 xe = vec3(0,0,0);
+
+        // start/end normals
+        vec3 ns = vec3(0,0,0);
+        vec3 ne = vec3(0,0,0);
+
+        // Naive method : ALL permutations 
+
+        if (s0 != s1 && s0 != s2) {
+            // start is s2 to s0, end is s2 to s1
+            silh = 0.25;
+
+            // Weighted silhouette points
+            xs = xprime(d0, d1, v0, v1);
+            xe = xprime(d0, d2, v0, v2);
+
+            // Normal is the interp of the two end normals
+            L = distance(v0, xs) / distance(v0, v1);
+            ns = lerp(n0, n1, L);
+
+            L = distance(v0, xe) / distance(v0, v2);
+            ne = lerp(n0, n2, L);
+        }
+        else if (s1 != s0 && s1 != s2) {
+            silh = 0.50;
+            
+            xs = xprime(d1, d0, v1, v0);
+            xe = xprime(d1, d2, v1, v2);
+
+            L = distance(v1, xs) / distance(v1, v0);
+            ns = lerp(n1, n0, L);
+
+            L = distance(v1, xe) / distance(v1, v2);
+            ne = lerp(n1, n2, L);
+        }
+        else if (s2 != s0 && s2 != s1) {
+            silh = 0.75;
+
+            xs = xprime(d2, d0, v2, v0);
+            xe = xprime(d2, d1, v2, v1);
+
+            L = distance(v2, xs) / distance(v2, v0);
+            ns = lerp(n2, n0, L);
+
+            L = distance(v2, xe) / distance(v2, v1);
+            ne = lerp(n2, n1, L);
+        }
+        else {
+            silh = 0;
+        }
+
+        // Render out input triangles
+        if (!u_SilhouetteOnly) {
+            for (i = 0; i < 5; i += 2) {
+            //for (i = 0; i < 3; i++) { 
+                o.col = vec4(u_SolidColor, 1.0);
+
+                if (u_Debug) {
+                    o.col = lerp(
+                        lerp(vec4(input[i].normal, 1.0), input[i].col, u_UseVertColor),
+                        vec4(0, 0, 0, 1),
+                        silh
+                    );
+                }
+
+                o.worldNormal = (u_ModelMatrix * vec4(input[i].normal, 0)).xyz;
+
+                gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1);
+                EmitVertex();
+            }
+
+            EndPrimitive();
+        }
+       
+        if (silh > 0) {
+            vec3 up = xe - xs;
+			vec3 look = u_CameraMatrix[3].xyz - xs;
+            look.y = 0;
+            look = normalize(look);
+            up = normalize(up);
+            vec3 right = cross(up, look);
+            
+			float halfS = 0.5f * u_OutlineScale;
+			vec3 v[4];
+
+            // TODO: ns/ne should NOT be perpendicular to the face normal that we're drawing along.
+            // instead, this should be flush with the view space.
+            v[0] = vec3(xs + u_OutlineScale * ns);
+            v[1] = vec3(xe + u_OutlineScale * ne);
+            v[2] = vec3(xs);
+            v[3] = vec3(xe);
+
+            // Check if the quad is facing the camera
+            // IFF dot(cross(A-B,C-A), A - ViewDir) > 0
+            vec3 N = cross(v[0] - v[1], v[2] - v[0]);
+            vec4 worldPos = u_MVPMatrix * vec4(v[0], 1.0);
+            float NdotV = dot(N, worldPos.xyz - u_CameraMatrix[3].xyz);
+
+            o.col = vec4(u_OutlineColor, 1);
+
+            // TODO: Set o.worldNormal for silhouette edges
+
+            // Debug out original facing directions before the flip
+            // (red is forward, green is reversed)
+            if (u_Debug) {
+                if (NdotV > 0) {
+                    o.col = vec4(1, 0, 0, 1);
+                } else if (NdotV < 0) {
+                    o.col = vec4(0, 1, 0, 1);
+                }
+            }
+
+            if (NdotV > 0) {
+                for (i = 0; i < 4; i++) {
+                    gl_Position = u_MVPMatrix * vec4(v[i], 1.0);
+                    EmitVertex();
+                }
+            } else {
+                // Flip winding order
+                gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
+                EmitVertex();
+                
+                gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
+                EmitVertex();
+                
+                gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
+                EmitVertex();
+                
+                gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
+                EmitVertex();
+            }
+            
+            EndPrimitive();
+        }
+
+	}
+
+    void main() {
+        build();
+    }
+}
+
+GLSLShader frag
+{
+	void main()
+	{
+        col = i.col;
+	}
+}
+
+technique Main
+<
+	string index_buffer_type = "GLSL_TRIADJ";
+>
+{
+	pass p0
+	{
+		VertexShader (in appdata, out v2g o) = vert;
+		GeometryShader (in v2g input, out g2f o) = geom;
+		PixelShader (in g2f i, out ps_out) = frag;
+	}
+}
+
