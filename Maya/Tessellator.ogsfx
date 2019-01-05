@@ -1,9 +1,10 @@
 #version 410
 
+#define BLACK vec4(0, 0, 0, 1)
+#define WHITE vec4(1, 1, 1, 1)
 #define RED vec4(1, 0, 0, 1)
 #define GREEN vec4(0, 1, 0, 1)
 #define BLUE vec4(0, 0, 1, 1)
-#define BLACK vec4(0, 0, 0, 1)
 
 /**
  * Tessellation Experiments.
@@ -120,8 +121,8 @@ GLSLShader tcs
         o[gl_InvocationID].worldPosition = vec4(input[index].vertex, 1);
         o[gl_InvocationID].normal = input[index].normal;
 
-        vec3 c = vec3(gl_InvocationID * 0.5 + 0.5);
-        o[gl_InvocationID].col = vec4(c, 1); // input[index].col;
+
+        o[gl_InvocationID].col = WHITE; // vec4(c, 1); // input[index].col;
 
         // Calculate tessellation levels for only one of the invocations
         if (index == 1) {
@@ -141,7 +142,7 @@ GLSLShader tcs
 }
 
 // Or: fractional_even_spacing, fractional_odd_spacing
-tesparams(triangles, equal_spacing, cw);
+tesparams(triangles, equal_spacing, ccw);
 GLSLShader tes
 {
     vec3 projectOntoPlane(vec3 point, vec3 planePoint, vec3 planeNormal)
@@ -181,7 +182,7 @@ GLSLShader tes
                    input[2].normal * W;
 
         // o.col = vec4(gl_TessCoord.xyz, 1);
-        o.col = vec4(1, 1, 1, 1);
+        o.col = BLACK;
 
         if (V < 0.001 && W < 0.001) { // on vert 0
             o.col = RED;
