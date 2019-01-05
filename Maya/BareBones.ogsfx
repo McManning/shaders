@@ -1,0 +1,115 @@
+#version 410
+
+/**
+ * Bare bones "clean room" shader with a geo passthrough
+ */
+
+uniform mat4 u_MVPMatrix : WorldViewProjection;
+uniform mat4 u_ModelMatrix : World;
+uniform mat4 u_NormalMatrix : WorldInverseTranspose;
+
+// Camera world space position would be u_CameraMatrix[3].xyz
+uniform mat4 u_CameraMatrix : ViewInverse;
+
+// ---------------------------------------------
+// Settings Group
+// ---------------------------------------------
+uniform vec3 u_SolidColor : DIFFUSE
+<
+    string UIName = "Solid Color";
+    string UIGroup = "Fill";
+    string UIWidget = "Color";
+> = {1, 0, 0};
+
+// ---------------------------------------------
+// Shader inputs/outputs
+// ---------------------------------------------
+attribute appdata
+{
+	vec3 vertex : POSITION;
+	vec3 normal : NORMAL;
+};
+
+// v2g and g2f can be consolidated, if they end up similar enough.
+
+attribute v2g
+{
+	vec3 vertex : POSITION;
+	vec3 normal : NORMAL;
+    vec4 col : COLOR0;
+};
+
+attribute g2f
+{
+    // vec4 clipPosition : SV_Position|POSITION0;
+    vec3 worldNormal : NORMAL;
+    vec3 worldPosition : TEXCOORD3;
+	vec4 col : COLOR0;
+};
+
+attribute frag_out
+{
+	vec4 col : COLOR0;
+};
+
+GLSLShader vert
+{
+	void main()
+	{
+		o.normal = normal;
+        o.vertex = vertex;
+        o.col = vec4(u_SolidColor, 1);
+        
+        gl_Position = u_MVPMatrix * vec4(vertex, 1);
+	}
+}
+
+GLSLShader geom
+{
+    // Input type: 6 vertices as GL_TRIANGLES_ADJACENCY 
+    layout(triangles_adjacency) in;
+
+    // Output type: triangle strip with up to 15 verts
+    layout(triangle_strip, max_vertices = 15) out;
+
+    // Passthrough GL_TRIANGLES_ADJACENCY
+    void passthroughTriAdj() {
+        int i;
+
+        for (i = 0; i < 5; i += 2) {
+            o.col = input[i].col;
+            o.worldNormal = (u_ModelMatrix * vec4(input[i].normal, 0)).xyz;
+            o.worldPosition = (u_ModelMatrix * vec4(input[i].vertex, 1)).xyz;
+
+            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1);
+            EmitVertex();
+        }
+
+        EndPrimitive();
+    }
+
+    void main() {
+        passthroughTriAdj();
+    }
+}
+
+GLSLShader frag
+{
+	void main()
+	{
+        col = input.col;
+	}
+}
+
+technique Main
+<
+	string index_buffer_type = "GLSL_TRIADJ";
+>
+{
+	pass p0
+	{
+		VertexShader (in appdata, out v2g o) = vert;
+		GeometryShader (in v2g input, out g2f o) = geom;
+		PixelShader (in g2f input, out frag_out) = frag;
+	}
+}
