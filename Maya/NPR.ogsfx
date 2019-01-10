@@ -528,16 +528,54 @@ GLSLShader frag
 	}
 }
 
+// Shadow fragment shader - from the perspective of our light(s)
+GLSLShader shadowFrag
+{
+    /**
+     * Via Autodesk's Uber Shader
+     */
+    float getShadowDepth(vec4 worldPos, mat4 shadowProjMatrix) 
+    {
+        vec4 mul = shadowProjMatrix * worldPos;
+        float depthPerPixel = mul.z / mul.w;
+        return (depthPerPixel + fwidth(depthPerPixel)) * 0.5 + 0.5;
+    }
+
+    void main()
+    {
+        // Dotted shadow, for verifying we're actually running
+        if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
+
+        float depth = getShadowDepth(vec4(i.worldPosition, 1), u_ShadowViewProj);
+        col = vec4(depth, depth, depth, 1);
+    }
+}
+
 technique Main
 <
 	string index_buffer_type = "GLSL_TRIADJ";
 >
 {
+    // Standard color pass and lighting
 	pass p0
+    <
+        string drawContext = "colorPass";
+    >
 	{
 		VertexShader (in appdata, out v2g o) = vert;
 		GeometryShader (in v2g input, out g2f o) = geom;
 		PixelShader (in g2f i, out ps_out) = frag;
 	}
+
+    // Shadow cast pass
+    pass p1
+    <
+        string drawContext = "shadowPass";
+    >
+    {
+		VertexShader (in appdata, out v2g o) = vert;
+		GeometryShader (in v2g input, out g2f o) = geom;
+		PixelShader (in g2f i, out ps_out) = shadowFrag;
+    }
 }
 
