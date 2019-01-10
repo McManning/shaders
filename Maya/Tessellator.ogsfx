@@ -340,14 +340,14 @@ GLSLShader frag
 	void main()
 	{
         // col = vec4(input.normal, 1);
-        col = input.col;
+        col = vec4(0, 0, 0, 1); // input.col;
 	}
 }
 
 technique Main
 <
     string Transparency = "Opaque";
-	string index_buffer_type = "GLSL_PNAEN18";
+	string index_buffer_type = "GLSL_PNAEN9";
 >
 {
 	pass p0
@@ -363,7 +363,7 @@ technique Main
 technique Wireframe
 <
     string Transparency = "Opaque";
-    string index_buffer_type = "GLSL_PNAEN18";
+    string index_buffer_type = "GLSL_PNAEN9";
 >
 {
     pass p0
