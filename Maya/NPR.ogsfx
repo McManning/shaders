@@ -516,8 +516,7 @@ GLSLShader frag
     // }
 
     /**
-     * @return 1 to ignore shadowing, < 1 otherwise. 
-     *  (I know, "contribution" is a misnomer in this case)
+     * @return 1 for fully in shadow, 0 for no contribution
      */
     float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos) 
     {
@@ -534,7 +533,7 @@ GLSLShader frag
             perspViewPos.z < -1 || 
             perspViewPos.z > 1
         ) {
-            return 1;
+            return 0;
         }
 
         // Transform texture sample location from [-1, 1] to [0, 1] in UV coordinates
@@ -551,10 +550,12 @@ GLSLShader frag
 
         // Note that Maya only has depth information in the x
         if (depth - sampled.x >= 0) {
-            return 0.0;
+            // return 1;
         }
 
-        return 1.0;
+        return 0;
+    }
+
     }
 
     vec3 calculateLight(
@@ -565,6 +566,8 @@ GLSLShader frag
         vec3 lightDir, 
         vec3 lightColor,
         float lightIntensity, 
+        float lightConeAngle,
+        float lightFalloff,
         // Fragment arguments
         vec4 worldPos,
         vec3 worldNormal,
@@ -590,29 +593,45 @@ GLSLShader frag
 
         float NdotL = clamp(dot(worldNormal, L), 0, 1);
 
-        // Distance cutoff, based on light intensity 
+        // Basic light intensity based on fragment normal
         float intensity = max(0, NdotL * lightIntensity);
 
-        vec3 diffuse = lerp(
-            u_ShadedColor,
-            u_SolidColor,
-            smoothstep(0.0, lightIntensity * 0.05, intensity)
-        );
+        // vec3 diffuse = lerp(
+        //     u_ShadedColor,
+        //     u_SolidColor,
+        //     smoothstep(0.0, lightIntensity * 0.05, intensity)
+        // );
 
-        if (intensity < u_ShadowThreshold) {
-            result += u_ShadedColor;
-        } else if (intensity >= u_ShadowThreshold + 0.001) {
-            result += u_SolidColor;
-        } else {
-            result += vec3(1, 0, 0);
+        // // Two-tone lighting
+        // if (intensity < u_ShadowThreshold) {
+        //     result += u_ShadedColor;
+        // } else if (intensity >= u_ShadowThreshold + 0.001) {
+        //     result += u_SolidColor;
+        // } else {
+        //     result += vec3(1, 0, 0);
+        // }
+
+        // Get a contribution from the shadow map of the light
+        // 0 - fully in shadow, 1 - no shadow contributions
+        float shadow = 1 - calculateShadowsContribution(light0ViewProj, worldPos);
+
+        float decay = 1.0;
+
+        // If we're a spotlight, decay around the cone
+        if (lightType == 2) {
+            float LdotDir = dot(normalize(lightVec), -lightDir);
+            // coneDecay = pow(saturate(LdotDir), 1 / lightConeAngle);
+            decay = smoothstep(cos(lightFalloff), cos(lightConeAngle), LdotDir);
         }
 
-        float v = clamp(intensity / lightIntensity, 0.01, 0.99);
-        vec3 samp = texture2D(u_ShadowMapSampler, vec2(0, v)).xyz;
+        // float v = clamp(intensity / lightIntensity, 0.01, 0.99);
+        // vec3 samp = texture2D(u_ShadowMapSampler, vec2(0, v)).xyz;
 
-        float shadow = calculateShadowsContribution(light0ViewProj, worldPos);
+        intensity = intensity * decay * shadow;
 
-        return lerp(vec3(1, 0, 0), result, shadow);
+        return vec3(shadow, shadow, shadow);
+        return vec3(intensity, intensity, intensity);
+        // return lerp(vec3(0, 0, 0), result, shadow * lightDecay);
     }
 
 	void main()
@@ -629,6 +648,8 @@ GLSLShader frag
             light0Dir,
             light0Color,
             light0Intensity,
+            light0ConeAngle,
+            light0FallOff,
             i.worldPosition,
             i.worldNormal,
             eyeDir
@@ -654,7 +675,7 @@ GLSLShader shadowFrag
     void main()
     {
         // Dotted shadow, for verifying we're actually running
-        if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
+        // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
 
         float depth = getShadowDepth(i.worldPosition, u_ShadowViewProj);
         col = vec4(depth, depth, depth, 1);
