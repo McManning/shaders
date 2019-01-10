@@ -179,10 +179,27 @@ GLSLShader tcs
             //gl_TessLevelOuter[1] corresponds to gl_InvocationID 0 and 1
             //gl_TessLevelOuter[2] corresponds to gl_InvocationID 2 and 0
             
+            // A better algorithm would be to tessellate based on the amount of screen space
+            // the triangle is using - but I'm lazy and this'll most likely be ported into
+            // an existing tessellator (UE4 probably). Will expand upon later if I go back
+            // to playing with tessellation algos.
+            vec4 w0 = u_ModelMatrix * vec4(input[0].vertex, 1);
+            vec4 w1 = u_ModelMatrix * vec4(input[1].vertex, 1);
+            vec4 w2 = u_ModelMatrix * vec4(input[2].vertex, 1);
+            vec4 cam = u_CameraMatrix[3];
+
+            float d0 = distance(cam, w0);
+            float d1 = distance(cam, w1);
+            float d2 = distance(cam, w2);
+
             // # of segments on each edge of the triangle
-            gl_TessLevelOuter[0] = u_TessOuter;
-            gl_TessLevelOuter[1] = u_TessOuter;
-            gl_TessLevelOuter[2] = u_TessOuter;
+            gl_TessLevelOuter[0] = min(u_TessMaxDistance / ((d1 + d2) * 0.5), 1) * u_TessOuter;
+            gl_TessLevelOuter[1] = min(u_TessMaxDistance / ((d0 + d2) * 0.5), 1) * u_TessOuter;
+            gl_TessLevelOuter[2] = min(u_TessMaxDistance / ((d0 + d1) * 0.5), 1) * u_TessOuter;
+            
+            // gl_TessLevelOuter[0] = clamp(u_TessMaxDistance / d0, 1, 20);
+            // gl_TessLevelOuter[1] = clamp(u_TessMaxDistance / d2, 1, 20);
+            // gl_TessLevelOuter[2] = clamp(u_TessMaxDistance / d1, 1, 20);
 
             // # of rings within the triangle, roughly
             gl_TessLevelInner[0] = u_TessInner;
