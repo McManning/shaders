@@ -510,15 +510,10 @@ GLSLShader geom
 
 GLSLShader frag
 {
-
-    // float getSpotLightConeAngle(float angle, float falloff, vec3 lightVec, vec3 lightDir) {
-
-    // }
-
     /**
-     * @return 1 for fully in shadow, 0 for no contribution
+     * @return 1 for fully in shadow, 0 for no contribution, anything in between for AA
      */
-    float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos) 
+    float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos, float NdotL) 
     {
         vec4 viewPos = lightViewProj * worldPos;
 
@@ -544,21 +539,59 @@ GLSLShader frag
 
         // Sample depth map from light0 view and don't contribute if 
         // our depth is further from the light than sampled depth
+        // Note that Maya only has depth information in the x
         vec4 sampled = textureLod(light0ShadowMapSampler, uv, 0);
 
-        return sampled.x;
+        // tan(acos(NdotL)) is used to modify our bias based on the 
+        // slope for curved surfaces that end up artifacting
+        // Source: http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/
+        float bias = tan(acos(NdotL));
+        bias = clamp(bias, 0.0, 0.01);
 
-        // Note that Maya only has depth information in the x
-        if (depth - sampled.x >= 0) {
+        if (depth - sampled.x >= bias) {
             // return 1;
+
+            // An attempt at slight anti-aliasing of the edges.
+            // It's pretty piss poor, but this is a good
+            // spot for a TODO to replace with a better algorithm.
+
+            // Random offsets for poisson sampling of UV coordinates around our texel
+            // Samples come from: https://www.geeks3d.com/20100628/3d-programming-ready-to-use-64-sample-poisson-disc/
+            vec2 poissonDisk[16] = vec2[](
+                vec2(-0.667531, 0.326090),
+                vec2(-0.098422, -0.295755),
+                vec2(-0.885922, 0.215369),
+                vec2(0.566637, 0.605213),
+                vec2(0.039766, -0.396100),
+                vec2(0.751946, 0.453352),
+                vec2(0.078707, -0.715323),
+                vec2(-0.075838, -0.529344),
+                vec2(0.724479, -0.580798),
+                vec2(0.222999, -0.215125),
+                vec2(-0.467574, -0.405438),
+                vec2(-0.248268, -0.814753),
+                vec2(0.354411, -0.887570),
+                vec2(0.175817, 0.382366),
+                vec2(0.487472, -0.063082),
+                vec2(-0.084078, 0.898312)
+            );
+
+            float sum = 1;
+            // Poisson sampling of adjacent texels to get some mild AA going on.
+            // Numbers are trial and error and probably won't work for everything :^)
+            for (int i = 0; i < 8; i++) {
+                if (depth - textureLod(light0ShadowMapSampler, uv + poissonDisk[i]/1000.0, 0).x < bias) {
+                    sum -= 0.2;
+                }
+            }
+
+            return sum;
         }
 
         return 0;
     }
 
-    }
-
-    vec3 calculateLight(
+    float calculateLightContribution(
         // Light arguments
         bool lightEnable, 
         int lightType, 
@@ -573,16 +606,13 @@ GLSLShader frag
         vec3 worldNormal,
         vec3 eyeDir
     ) {
-        vec3 result = vec3(0, 0, 0);
-
         if (!lightEnable) {
-            return result;
+            return 0;
         }
 
         // If ambient light - do a color mix and no additional
         // shadow mapping or whatever. (use light color + intensity for mix)
 
-    
         vec3 lightVec = lightPos - worldPos.xyz;
         vec3 L = normalize(lightVec);
 
@@ -595,6 +625,10 @@ GLSLShader frag
 
         // Basic light intensity based on fragment normal
         float intensity = max(0, NdotL * lightIntensity);
+
+        // Clamp intensity to two tone.
+        // TODO: Get a little better AA here.
+        intensity = 1 - step(intensity, 0.9);
 
         // vec3 diffuse = lerp(
         //     u_ShadedColor,
@@ -613,14 +647,14 @@ GLSLShader frag
 
         // Get a contribution from the shadow map of the light
         // 0 - fully in shadow, 1 - no shadow contributions
-        float shadow = 1 - calculateShadowsContribution(light0ViewProj, worldPos);
+        float shadow = 1 - calculateShadowsContribution(light0ViewProj, worldPos, NdotL);
 
         float decay = 1.0;
 
         // If we're a spotlight, decay around the cone
         if (lightType == 2) {
             float LdotDir = dot(normalize(lightVec), -lightDir);
-            // coneDecay = pow(saturate(LdotDir), 1 / lightConeAngle);
+            // coneDecay = pow(clamp(LdotDir, 0.0, 1.0), 1 / lightConeAngle);
             decay = smoothstep(cos(lightFalloff), cos(lightConeAngle), LdotDir);
         }
 
@@ -632,6 +666,7 @@ GLSLShader frag
         return vec3(shadow, shadow, shadow);
         return vec3(intensity, intensity, intensity);
         // return lerp(vec3(0, 0, 0), result, shadow * lightDecay);
+        return clamp(intensity * decay * shadow, 0.0, 1.0);
     }
 
 	void main()
@@ -641,7 +676,7 @@ GLSLShader frag
 
         vec3 eyeDir = normalize(u_CameraMatrix[3].xyz - i.worldPosition.xyz);
 
-        vec3 light = calculateLight(
+        float light = calculateLightContribution(
             light0Enable, 
             light0Type, 
             light0Pos,
@@ -654,8 +689,6 @@ GLSLShader frag
             i.worldNormal,
             eyeDir
         );
-
-        col = vec4(light, 1);
 	}
 }
 
