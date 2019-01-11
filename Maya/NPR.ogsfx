@@ -107,6 +107,18 @@ uniform bool u_UseVertColor
     string UIGroup = "Debug";
 > = false;
 
+// Which part of the lighting equation should we display for debug.
+// Each contribution will typically blend white (lit) to black (unlit)
+uniform int u_IsolateLightContribution
+<
+    string UIName = "Isolate Light Contrib";
+    string UIGroup = "Debug";
+    string UIFieldNames="None:Combined:Intensity:Shadows:Decay";
+    float UIMin = 0;
+    float UIMax = 3;
+    float UIStep = 1;
+> = 0;
+
 // ---------------------------------------------
 // Light 0 Group
 // ---------------------------------------------
@@ -661,11 +673,19 @@ GLSLShader frag
         // float v = clamp(intensity / lightIntensity, 0.01, 0.99);
         // vec3 samp = texture2D(u_ShadowMapSampler, vec2(0, v)).xyz;
 
-        intensity = intensity * decay * shadow;
+        if (u_IsolateLightContribution == 2) { // Intensity
+            return intensity;
+        }
 
-        return vec3(shadow, shadow, shadow);
-        return vec3(intensity, intensity, intensity);
-        // return lerp(vec3(0, 0, 0), result, shadow * lightDecay);
+        if (u_IsolateLightContribution == 3) { // Shadows
+            return shadow;
+        }
+
+        if (u_IsolateLightContribution == 4) { // Decay
+            return decay;
+        }
+
+        // Default: mix 
         return clamp(intensity * decay * shadow, 0.0, 1.0);
     }
 
@@ -689,6 +709,14 @@ GLSLShader frag
             i.worldNormal,
             eyeDir
         );
+        
+        // 
+        if (u_IsolateLightContribution > 0) {
+            col = vec4(light, light, light, 1);
+        } else {
+            // do a blend.
+            col = vec4(lerp(u_ShadedColor, u_SolidColor, light), 1);
+        }
 	}
 }
 
