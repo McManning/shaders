@@ -16,20 +16,21 @@ attribute vs_to_tcs {
 	vec3 normal : NORMAL;
     vec4 color : COLOR0;
     int id : TEXCOORD2;
+    float sum : TEXCOORD3;
 };
 
 attribute tcs_to_tes {
     vec3 position : POSITION;
 	vec3 normal : NORMAL;
     vec4 color : COLOR0;
-    float silhouette : TEXCOORD3;
+    float sum : TEXCOORD3;
 };
 
 attribute tes_to_gs {
     vec3 position : POSITION;
 	vec3 normal : NORMAL;
     vec4 color : COLOR0;
-    float silhouette : TEXCOORD3;
+    float sum : TEXCOORD3;
 };
 
 attribute gs_to_ps {
@@ -50,6 +51,7 @@ GLSLShader VS // Vertex
         o.normal = normalize(normal);
         o.color = vec4(u_Diffuse, 1); // vec4(normal, 1); // vec4(1, 0, 0, 1);
         o.id = gl_VertexID;
+        o.sum = 0.0;
     }
 }
 
@@ -149,11 +151,11 @@ patchsize 3;
 GLSLShader TCS // Tessellation Control
 {
     bool cmp(int a, int b) {
-        return distance(i[a].normal, i[b].normal) > 0;
+        return distance(i[a].normal, i[b].normal) > 0.1;
     }
 
     bool cmp2(int a, int b, int c) {
-        return i[a].id != i[b].id || i[a].id != i[c].id;
+        return (i[a].id != i[b].id || i[a].id != i[c].id);
     }
 
     void main()
@@ -181,14 +183,29 @@ GLSLShader TCS // Tessellation Control
         o[gl_InvocationID].position = i[index].position;
         o[gl_InvocationID].normal = i[index].normal;
         o[gl_InvocationID].color = i[index].color;
+        o[gl_InvocationID].sum = i[index].sum;
 
         // flag it as a hard if any of the corners have differing normals
         // if (cmp(0, 3) || cmp(1, 5) || cmp(2, 7) || cmp(0, 8) || cmp(1, 4) || cmp(2, 6)) {
         //     o[gl_InvocationID].color = vec4(0, 1, 0, 1);
         // }
 
-        if (cmp2(0, 3, 8) || cmp2(1, 4, 5) || cmp2(2, 6, 7)) {
-            o[gl_InvocationID].color = vec4(0, 1, 0, 1);
+        // Flags tris with maya hard edges (successfully, mind you)
+        // if (cmp2(0, 3, 8) || cmp2(1, 4, 5) || cmp2(2, 6, 7)) {
+        //     o[gl_InvocationID].color = vec4(0, 1, 0, 1);
+        // }
+
+        // Sum up the number of split vertices
+        if (index == 0 && cmp2(0, 3, 8)) {
+            o[gl_InvocationID].sum += 0.1;
+        }
+
+        if (index == 1 && cmp2(1, 4, 5)) {
+            o[gl_InvocationID].sum += 0.1;
+        }
+
+        if (index == 2 && cmp2(2, 6, 7)) {
+            o[gl_InvocationID].sum += 0.1;
         }
 
         /*
@@ -227,9 +244,12 @@ GLSLShader TES // Tessellation Evaluation
                      i[1].color.xyz * V +
                      i[2].color.xyz * W;
 
+        float sum = i[0].sum * U + i[1].sum * V + i[2].sum * W;
+
         o.position = position;
         o.normal = normal;
         o.color = vec4(color, 1.0); // TODO: Alpha?
+        o.sum = sum;
 
         // gl_Position = vec4(o.position, 1.0);
     }
@@ -293,19 +313,99 @@ GLSLShader GS // Geometry
         EndPrimitive();
     }
 
+    struct creaseOutput {
+        bool valid;
+        vec3 sV;
+        vec3 eV;
+        vec3 sN;
+        vec3 eN;
+    };
+
+    creaseOutput crease(vec3 v0, vec3 v1, float s0, float s1, vec3 n0, vec3 n1) {
+        creaseOutput result;
+
+        result.valid = false;
+
+        if (s0 > 0 && s1 > 0) {
+            result.valid = true;
+            result.sV = v0;
+            result.eV = v1;
+            result.sN = n0;
+            result.eN = n1;
+        }
+
+        return result;
+    }
+
+    void emitCreaseQuad(creaseOutput c) 
+    {
+        // temp AF
+        
+        vec3 v[4];
+
+        vec3 up = normalize(c.sV - c.eV);
+        vec3 right = cross(up, c.sN);
+        
+        // TODO: ns/ne should NOT be perpendicular to the face normal that we're drawing along.
+        // instead, this should be flush with the view space.
+        float scale = u_OutlineScale * 0.5;
+        vec3 offset = c.sN * 0.002;
+        // v[0] = vec3(c.start + u_OutlineScale) + c.normal * scale;
+        // v[1] = vec3(c.end + u_OutlineScale) + c.normal * scale;
+        // v[2] = vec3(c.start) + c.normal * scale;
+        // v[3] = vec3(c.end) + c.normal * scale;
+        
+        // v[0] = vec3(c.sV + right); // + offset;
+        // v[1] = vec3(c.eV + right * scale) + offset;
+        // v[2] = vec3(c.sV) + offset;
+        // v[3] = vec3(c.eV) + offset * 10;
+        
+        v[0] = vec3(c.sV + u_OutlineScale * normalize(c.sN));
+        v[1] = vec3(c.eV + u_OutlineScale * normalize(c.eN));
+        v[2] = vec3(c.sV);
+        v[3] = vec3(c.eV);
+
+        // Set color information
+        o.color = vec4(1, 1, 0, 1);
+    
+        // TODO: Set o.normal & o.worldPosition
+
+        // Check if the quad is facing the camera
+        // IFF dot(cross(A-B,C-A), A - ViewDir) > 0
+        // If not - we need to flip winding order
+        vec3 N = cross(v[0] - v[1], v[2] - v[0]);
+        vec4 worldPos = u_MVPMatrix * vec4(v[0], 1.0);
+        float NdotV = dot(N, worldPos.xyz - u_CameraMatrix[3].xyz);
+    
+        if (NdotV > 0) {
+            for (int idx = 0; idx < 4; idx++) {
+                gl_Position = u_MVPMatrix * vec4(v[idx], 1.0);
+                EmitVertex();
+            }
+        } else { // Flip winding order
+            gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
+            EmitVertex();
+            
+            gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
+            EmitVertex();
+            
+            gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
+            EmitVertex();
+            
+            gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
+            EmitVertex();
+        }
+        
+        EndPrimitive();
+    }
+
     void main()
     {   
-        // See note in TCS about this calculation happening here...
-        // Lazy method: we'll just do this for every triangle again.
-        silhouetteOutput s = silhouette(
-            i[0].position, i[1].position, i[2].position, 
-            i[0].normal, i[1].normal, i[2].normal
-        );
-
         if (!u_SilhouetteOnly) {
             // Emit input vertices
             for (int idx = 0; idx < 3; idx++) {
-                o.color = i[idx].color; // * s.valid;
+                // o.color = i[idx].color; // * s.valid;
+                o.color = vec4(i[idx].sum, 0, 0, 1);
                 o.normal = i[idx].normal;
                 o.worldPosition = u_MVPMatrix * vec4(i[idx].position, 1.0);
                 
@@ -317,8 +417,50 @@ GLSLShader GS // Geometry
             EndPrimitive();
         }
         
+        // See note in TCS about this calculation happening here...
+        // Lazy method: we'll just do this for every triangle again.
+        silhouetteOutput s = silhouette(
+            i[0].position, i[1].position, i[2].position, 
+            i[0].normal, i[1].normal, i[2].normal
+        );
+
         if (s.valid > 0) {
             emitSilhouetteQuad(s);
+        }
+
+        creaseOutput c;
+
+        // 0 -> 1 crease edge
+        c = crease(
+            i[0].position, i[1].position, 
+            i[0].sum, i[1].sum,
+            i[0].normal, i[1].normal
+        );
+
+        if (c.valid) {
+            emitCreaseQuad(c);
+        }
+
+        // 1 -> 2 crease edge
+        c = crease(
+            i[1].position, i[2].position, 
+            i[1].sum, i[2].sum,
+            i[1].normal, i[2].normal
+        );
+
+        if (c.valid) {
+            emitCreaseQuad(c);
+        }
+
+        // 2 -> 0 crease edge
+        c = crease(
+            i[2].position, i[0].position, 
+            i[2].sum, i[0].sum,
+            i[2].normal, i[0].normal
+        );
+
+        if (c.valid) {
+            emitCreaseQuad(c);
         }
     }
 }
