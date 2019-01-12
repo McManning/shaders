@@ -1,0 +1,112 @@
+/**
+ * Passthrough (do nothing fancy) programs
+ */
+#ifndef _PASSTHROUGH_OGSFH_
+#define _PASSTHROUGH_OGSFH_
+
+GLSLShader VS_Passthrough
+{
+    void main()
+    {
+        o.position = position;
+        o.normal = normal;
+        o.color = vec4(1, 1, 1, 1);
+    }
+}
+
+patchsize 3;
+GLSLShader TCS_Passthrough
+{
+    void main()
+    {
+        const uint index = gl_InvocationID;
+
+        o[gl_InvocationID].position = i[index].position;
+        o[gl_InvocationID].normal = i[index].normal;
+        o[gl_InvocationID].color = i[index].color;
+
+        if (index == 2) {
+            gl_TessLevelOuter[0] = 1;
+            gl_TessLevelOuter[1] = 1;
+            gl_TessLevelOuter[2] = 1;
+
+            gl_TessLevelInner[0] = 0;
+        }
+    }
+}
+
+tesparams(triangles, equal_spacing, ccw);
+GLSLShader TES_Passthrough
+{
+    void main()
+    {
+        float U = gl_TessCoord.x;
+        float V = gl_TessCoord.y;
+        float W = gl_TessCoord.z;
+        
+        // Compute linear tessellation using the barycentric coordinates
+        vec3 position = i[0].position.xyz * U + 
+                        i[1].position.xyz * V +
+                        i[2].position.xyz * W;
+
+        vec3 normal = i[0].normal.xyz * U + 
+                      i[1].normal.xyz * V +
+                      i[2].normal.xyz * W;
+
+        vec3 color = i[0].color.xyz * U + 
+                     i[1].color.xyz * V +
+                     i[2].color.xyz * W;
+
+        o.worldPosition = u_MVPMatrix * vec4(position, 1.0);
+        o.normal = normal;
+        o.color = vec4(color, 1.0);
+
+        gl_Position = o.worldPosition;
+    }
+}
+
+GLSLShader GS_Passthrough
+{
+    layout(triangles) in;
+    layout(triangle_strip, max_vertices = 3) out;
+
+    void main()
+    {
+        for (int idx = 0; idx < 3; idx++) {
+            o.color = i[idx].color;
+            o.normal = i[idx].normal;
+            o.worldPosition = i[idx].worldPosition;
+
+            gl_Position = o.worldPosition;
+            EmitVertex();
+        }
+
+        EndPrimitive();
+    }
+}
+
+GLSLShader PS_Passthrough
+{
+    void main()
+    {
+        color = i.color;
+    }
+}
+
+// technique Passthrough
+// <
+//     string Transparency = "Opaque";
+//     string index_buffer_type = "GLSL_PNAEN9";
+// >
+// {
+// 	pass p0
+// 	{
+// 		VertexShader (in vs_in, out vs_to_tcs o) = VS_Passthrough;
+//         TessControlShader (in vs_to_tcs i, out tcs_to_tes o) = TCS_Passthrough;
+//         TessEvaluationShader (in tcs_to_tes i, out tes_to_gs o) = TES_Passthrough;
+//         GeometryShader (in tes_to_gs i, out gs_to_ps o) = GS_Passthrough;
+// 		PixelShader (in gs_to_ps i, out ps_out) = PS_Passthrough;
+// 	}
+// }
+
+#endif // _PASSTHROUGH_OGSFH_

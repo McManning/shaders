@@ -1,0 +1,364 @@
+#version 410
+
+#include "Settings.ogsfh"
+#include "Utility.ogsfh"
+
+#include "Wireframe.ogsfh"
+
+attribute vs_in {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : COLOR0;
+};
+ 
+attribute vs_to_tcs {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : COLOR0;
+    int id : TEXCOORD2;
+};
+
+attribute tcs_to_tes {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : COLOR0;
+    float silhouette : TEXCOORD3;
+};
+
+attribute tes_to_gs {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : COLOR0;
+    float silhouette : TEXCOORD3;
+};
+
+attribute gs_to_ps {
+    vec4 worldPosition : POSITION;
+    vec3 normal : NORMAL;
+    vec4 color : COLOR0;
+};
+
+attribute ps_out {
+    vec4 color : COLOR0;
+};
+
+GLSLShader VS // Vertex
+{
+    void main()
+    {
+        o.position = position;
+        o.normal = normalize(normal);
+        o.color = vec4(u_Diffuse, 1); // vec4(normal, 1); // vec4(1, 0, 0, 1);
+        o.id = gl_VertexID;
+    }
+}
+
+GLSLShader Common // Utility methods and whatnot
+{
+    vec3 xprime(float di, float dj, vec3 xi, vec3 xj) 
+    {
+        float L = abs(di) + abs(dj);
+        return (abs(dj) / L) * xi + (abs(di) / L) * xj;
+    }
+
+    struct silhouetteOutput
+    {
+        float valid;
+        vec3 vS;
+        vec3 vE;
+        vec3 nS;
+        vec3 nE;
+    };
+
+    /**
+     * Returns a nonzero vector 
+     */
+    silhouetteOutput silhouette(vec3 v0, vec3 v1, vec3 v2, vec3 n0, vec3 n1, vec3 n2) 
+    {
+        silhouetteOutput result;
+        float L;
+        
+        // Transform to world space
+        vec4 w0 = u_ModelMatrix * vec4(v0, 1.0);
+        vec4 w1 = u_ModelMatrix * vec4(v1, 1.0);
+        vec4 w2 = u_ModelMatrix * vec4(v2, 1.0);
+
+        vec4 cameraDir = normalize(u_CameraMatrix[2]);
+        vec4 cameraPos = u_CameraMatrix[3];
+
+        // dot(vertex normal, camera ray to vertex)
+        // TODO: This could be stored on source vertices and interpolated 
+        // automatically during TES
+        float d0 = dot(u_ModelMatrix * vec4(n0, 0), cameraPos - w0);
+        float d1 = dot(u_ModelMatrix * vec4(n1, 0), cameraPos - w1);
+        float d2 = dot(u_ModelMatrix * vec4(n2, 0), cameraPos - w2);
+        
+        // Offset NdotV a bit so we always have a nonzero.
+        // .: +1 for >= 0, -1 for < 0
+        float s0 = sign(d0 + 0.0001);
+        float s1 = sign(d1 + 0.0001);
+        float s2 = sign(d2 + 0.0001);
+
+        result.valid = 0.0;
+
+        if (s0 != s1 && s0 != s2) {
+            // start is s2 to s0, end is s2 to s1
+            result.valid = 0.25;
+
+            // Weighted silhouette points
+            result.vS = xprime(d0, d1, v0, v1);
+            result.vE = xprime(d0, d2, v0, v2);
+
+            // Normal is the interp of the two end normals
+            L = distance(v0, result.vS) / distance(v0, v1);
+            result.nS = lerp(n0, n1, L);
+
+            L = distance(v0, result.vE) / distance(v0, v2);
+            result.nE = lerp(n0, n2, L);
+        }
+        else if (s1 != s0 && s1 != s2) {
+            result.valid = 0.50;
+            
+            result.vS = xprime(d1, d0, v1, v0);
+            result.vE = xprime(d1, d2, v1, v2);
+
+            L = distance(v1, result.vS) / distance(v1, v0);
+            result.nS = lerp(n1, n0, L);
+
+            L = distance(v1, result.vE) / distance(v1, v2);
+            result.nE = lerp(n1, n2, L);
+        }
+        else if (s2 != s0 && s2 != s1) {
+            result.valid = 0.75;
+
+            result.vS = xprime(d2, d0, v2, v0);
+            result.vE = xprime(d2, d1, v2, v1);
+
+            L = distance(v2, result.vS) / distance(v2, v0);
+            result.nS = lerp(n2, n0, L);
+
+            L = distance(v2, result.vE) / distance(v2, v1);
+            result.nE = lerp(n2, n1, L);
+        }
+
+        return result;
+    }
+}
+
+patchsize 3;
+GLSLShader TCS // Tessellation Control
+{
+    bool cmp(int a, int b) {
+        return distance(i[a].normal, i[b].normal) > 0;
+    }
+
+    bool cmp2(int a, int b, int c) {
+        return i[a].id != i[b].id || i[a].id != i[c].id;
+    }
+
+    void main()
+    {
+        const uint index = gl_InvocationID;
+
+        float s = 0;
+
+        if (index == 2) {
+            gl_TessLevelOuter[0] = 1;
+            gl_TessLevelOuter[1] = 1;
+            gl_TessLevelOuter[2] = 1;
+
+            gl_TessLevelInner[0] = 0;
+        }
+    
+        // Silhouette triangle detection... haaas to happen on every vertex?
+        // Not great. Should only run once per face - and then the evaluation
+        // shader should flag the entire face if any of the corners are silh.
+        // s = silhouette(
+        //     i[0].position, i[1].position, i[2].position, 
+        //     i[0].normal, i[1].normal, i[2].normal
+        // );
+        
+        o[gl_InvocationID].position = i[index].position;
+        o[gl_InvocationID].normal = i[index].normal;
+        o[gl_InvocationID].color = i[index].color;
+
+        // flag it as a hard if any of the corners have differing normals
+        // if (cmp(0, 3) || cmp(1, 5) || cmp(2, 7) || cmp(0, 8) || cmp(1, 4) || cmp(2, 6)) {
+        //     o[gl_InvocationID].color = vec4(0, 1, 0, 1);
+        // }
+
+        if (cmp2(0, 3, 8) || cmp2(1, 4, 5) || cmp2(2, 6, 7)) {
+            o[gl_InvocationID].color = vec4(0, 1, 0, 1);
+        }
+
+        /*
+            TODO: Right now I can calculate silhouette in the TCS and pass it
+            all the way through to the geometry shader - since we don't tessellate.
+            Except: after tessellation we need to do a new scan of faces for potential
+            silhouette faces (which will always be a subset of the original silhouette face).
+
+            This can either happen in GS or TES. Laziest solution might be to pass through
+            the fact that a face had a POTENTIAL to be a silhouette edge and only re-run
+            the detection on those faces. But an even BETTER solution might be some way to
+            subset potential silhouette faces by using TES interpolation... 
+        */
+    }
+}
+
+tesparams(triangles, equal_spacing, ccw);
+GLSLShader TES // Tessellation Evaluation
+{
+    void main()
+    {
+        float U = gl_TessCoord.x;
+        float V = gl_TessCoord.y;
+        float W = gl_TessCoord.z;
+        
+        // Compute linear tessellation using the barycentric coordinates
+        vec3 position = i[0].position.xyz * U + 
+                        i[1].position.xyz * V +
+                        i[2].position.xyz * W;
+
+        vec3 normal = i[0].normal.xyz * U + 
+                      i[1].normal.xyz * V +
+                      i[2].normal.xyz * W;
+
+        vec3 color = i[0].color.xyz * U + 
+                     i[1].color.xyz * V +
+                     i[2].color.xyz * W;
+
+        o.position = position;
+        o.normal = normal;
+        o.color = vec4(color, 1.0); // TODO: Alpha?
+
+        // gl_Position = vec4(o.position, 1.0);
+    }
+}
+
+GLSLShader GS // Geometry
+{
+    layout(triangles) in;
+    layout(triangle_strip, max_vertices = 15) out;
+
+    void emitSilhouetteQuad(silhouetteOutput s)
+    {
+        // vec3 up = s.vE - s.vS;
+        // vec3 look = u_CameraMatrix[3].xyz - s.vS;
+        // look.y = 0;
+        // look = normalize(look);
+        // up = normalize(up);
+        // vec3 right = cross(up, look);
+        // float halfS = 0.5f * u_OutlineScale;
+
+        vec3 v[4];
+
+        // TODO: ns/ne should NOT be perpendicular to the face normal that we're drawing along.
+        // instead, this should be flush with the view space.
+        v[0] = vec3(s.vS + u_OutlineScale * normalize(s.nS));
+        v[1] = vec3(s.vE + u_OutlineScale * normalize(s.nE));
+        v[2] = vec3(s.vS);
+        v[3] = vec3(s.vE);
+
+        // Set color information
+        o.color = vec4(u_OutlineColor, 1.0);
+    
+        // TODO: Set o.normal & o.worldPosition
+
+        // Check if the quad is facing the camera
+        // IFF dot(cross(A-B,C-A), A - ViewDir) > 0
+        // If not - we need to flip winding order
+        vec3 N = cross(v[0] - v[1], v[2] - v[0]);
+        vec4 worldPos = u_MVPMatrix * vec4(v[0], 1.0);
+        float NdotV = dot(N, worldPos.xyz - u_CameraMatrix[3].xyz);
+    
+        if (NdotV > 0) {
+            for (int idx = 0; idx < 4; idx++) {
+                gl_Position = u_MVPMatrix * vec4(v[idx], 1.0);
+                EmitVertex();
+            }
+        } else { // Flip winding order
+            gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
+            EmitVertex();
+            
+            gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
+            EmitVertex();
+            
+            gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
+            EmitVertex();
+            
+            gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
+            EmitVertex();
+        }
+        
+        EndPrimitive();
+    }
+
+    void main()
+    {   
+        // See note in TCS about this calculation happening here...
+        // Lazy method: we'll just do this for every triangle again.
+        silhouetteOutput s = silhouette(
+            i[0].position, i[1].position, i[2].position, 
+            i[0].normal, i[1].normal, i[2].normal
+        );
+
+        if (!u_SilhouetteOnly) {
+            // Emit input vertices
+            for (int idx = 0; idx < 3; idx++) {
+                o.color = i[idx].color; // * s.valid;
+                o.normal = i[idx].normal;
+                o.worldPosition = u_MVPMatrix * vec4(i[idx].position, 1.0);
+                
+                gl_Position = o.worldPosition;
+
+                EmitVertex();
+            }
+
+            EndPrimitive();
+        }
+        
+        if (s.valid > 0) {
+            emitSilhouetteQuad(s);
+        }
+    }
+}
+
+GLSLShader PS // Pixel (Fragment)
+{
+    void main()
+    {
+        color = i.color;
+    }
+}
+
+technique Main
+<
+    string Transparency = "Opaque";
+    string index_buffer_type = "GLSL_PNAEN9";
+>
+{
+	pass p0
+	{
+		VertexShader (in vs_in, out vs_to_tcs o) = VS;
+        TessControlShader (in vs_to_tcs i, out tcs_to_tes o) = { Common, TCS };
+        TessEvaluationShader (in tcs_to_tes i, out tes_to_gs o) = TES;
+        GeometryShader (in tes_to_gs i, out gs_to_ps o) = { Common, GS };
+		PixelShader (in gs_to_ps i, out ps_out) = PS;
+	}
+}
+
+technique Wireframe
+<
+    string Transparency = "Opaque";
+    string index_buffer_type = "GLSL_PNAEN9";
+>
+{
+    pass p0
+    {
+        VertexShader (in vs_in, out vs_to_tcs o) = VS;
+        TessControlShader (in vs_to_tcs i, out tcs_to_tes o) = { Common, TCS };
+        TessEvaluationShader (in tcs_to_tes i, out tes_to_gs o) = TES;
+        GeometryShader (in tes_to_gs i, out gs_to_ps o) = GS_Wireframe;
+		PixelShader (in gs_to_ps i, out ps_out) = PS_Wireframe;
+    }
+}

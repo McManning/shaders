@@ -1,0 +1,74 @@
+/**
+ * Wireframe geo/fragment passes for debugging
+ */
+#ifndef _WIREFRAME_OGSFH_
+#define _WIREFRAME_OGSFH_
+
+GLSLShader GS_Wireframe
+{
+    layout(triangles) in;
+    layout(line_strip, max_vertices = 6) out;
+
+    void main()
+    {
+        vec4 v0 = u_MVPMatrix * vec4(i[0].position, 1.0);
+        vec4 v1 = u_MVPMatrix * vec4(i[1].position, 1.0);
+        vec4 v2 = u_MVPMatrix * vec4(i[2].position, 1.0);
+
+        o.color = i[0].color;
+        o.normal = i[0].normal;
+        o.worldPosition = v0;
+        gl_Position = v0;
+        EmitVertex();
+
+        o.color = i[1].color;
+        o.normal = i[1].normal;
+        o.worldPosition = v1;
+        gl_Position = v1;
+        EmitVertex();
+
+        EndPrimitive();
+
+        o.color = i[1].color;
+        o.normal = i[1].normal;
+        o.worldPosition = v1;
+        gl_Position = v1;
+        EmitVertex();
+
+        o.color = i[2].color;
+        o.normal = i[2].normal;
+        o.worldPosition = v2;
+        gl_Position = v2;
+        EmitVertex();
+
+        EndPrimitive();
+
+        o.color = i[2].color;
+        o.normal = i[2].normal;
+        o.worldPosition = v2;
+        gl_Position = v2;
+        EmitVertex();
+
+        o.color = i[0].color;
+        o.normal = i[0].normal;
+        o.worldPosition = v0;
+        gl_Position = v0;
+        EmitVertex();
+
+        EndPrimitive();
+    }
+}
+
+GLSLShader PS_Wireframe
+{
+    void main()
+    {
+        // Fade out backfaces slightly
+        vec3 camDir = normalize(u_CameraMatrix[2].xyz);
+        float d = lerp(0.5, 1.0, dot(i.normal, camDir)) * 0.8;
+
+        color = vec4(i.color.xyz * d, 1); // vec4(d, d, d, 1);
+    }
+}
+
+#endif // _WIREFRAME_OGSFH_
