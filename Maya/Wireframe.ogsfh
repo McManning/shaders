@@ -65,9 +65,9 @@ GLSLShader PS_Wireframe
     {
         // Fade out backfaces slightly
         vec3 camDir = normalize(u_CameraMatrix[2].xyz);
-        float d = lerp(0.5, 1.0, dot(i.normal, camDir)) * 0.8;
+        float d = lerp(0.0, 1.0, dot(i.normal, camDir));
 
-        color = vec4(i.color.xyz * d, 1); // vec4(d, d, d, 1);
+        color = vec4(d, d, d, 1);
     }
 }
 
