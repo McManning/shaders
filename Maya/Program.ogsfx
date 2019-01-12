@@ -185,16 +185,6 @@ GLSLShader TCS // Tessellation Control
         o[gl_InvocationID].color = i[index].color;
         o[gl_InvocationID].sum = i[index].sum;
 
-        // flag it as a hard if any of the corners have differing normals
-        // if (cmp(0, 3) || cmp(1, 5) || cmp(2, 7) || cmp(0, 8) || cmp(1, 4) || cmp(2, 6)) {
-        //     o[gl_InvocationID].color = vec4(0, 1, 0, 1);
-        // }
-
-        // Flags tris with maya hard edges (successfully, mind you)
-        // if (cmp2(0, 3, 8) || cmp2(1, 4, 5) || cmp2(2, 6, 7)) {
-        //     o[gl_InvocationID].color = vec4(0, 1, 0, 1);
-        // }
-
         // Sum up the number of split vertices
         if (index == 0 && cmp2(0, 3, 8)) {
             o[gl_InvocationID].sum += 0.1;
@@ -258,9 +248,64 @@ GLSLShader TES // Tessellation Evaluation
 GLSLShader GS // Geometry
 {
     layout(triangles) in;
-    layout(triangle_strip, max_vertices = 15) out;
 
-    void emitSilhouetteQuad(silhouetteOutput s)
+    // Bumped WAY up for emitting debugging. 
+    layout(line_strip, max_vertices = 128) out;
+
+    void emitTri(vec3 v0, vec3 v1, vec3 v2) // 6 verts
+    {
+        vec4 w0 = u_MVPMatrix * vec4(v0, 1.0);
+        vec4 w1 = u_MVPMatrix * vec4(v1, 1.0);
+        vec4 w2 = u_MVPMatrix * vec4(v2, 1.0);
+
+        gl_Position = w0; EmitVertex();
+        gl_Position = w1; EmitVertex();
+        EndPrimitive();
+
+        gl_Position = w1; EmitVertex();
+        gl_Position = w2; EmitVertex();
+        EndPrimitive();
+
+        gl_Position = w2; EmitVertex();
+        gl_Position = w0; EmitVertex();
+        EndPrimitive();
+    }
+
+    void emitQuad(vec3 v[4]) // 12 verts 
+    {
+        // Line strip - render as two tris
+        emitTri(v[0], v[1], v[2]);
+        emitTri(v[1], v[2], v[3]);
+        // Check if the quad is facing the camera
+        // IFF dot(cross(A-B,C-A), A - ViewDir) > 0
+        // If not - we need to flip winding order
+        // vec3 N = cross(v[0] - v[1], v[2] - v[0]);
+        // vec4 worldPos = u_MVPMatrix * vec4(v[0], 1.0);
+        // float NdotV = dot(N, worldPos.xyz - u_CameraMatrix[3].xyz);
+    
+        // if (NdotV > 0) {
+        //     for (int idx = 0; idx < 4; idx++) {
+        //         gl_Position = u_MVPMatrix * vec4(v[idx], 1.0);
+        //         EmitVertex();
+        //     }
+        // } else { // Flip winding order
+        //     gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
+        //     EmitVertex();
+            
+        //     gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
+        //     EmitVertex();
+            
+        //     gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
+        //     EmitVertex();
+            
+        //     gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
+        //     EmitVertex();
+        // }
+        
+        // EndPrimitive();
+    }
+
+    void emitSilhouetteQuad(silhouetteOutput s) // 12 verts
     {
         // vec3 up = s.vE - s.vS;
         // vec3 look = u_CameraMatrix[3].xyz - s.vS;
@@ -283,34 +328,8 @@ GLSLShader GS // Geometry
         o.color = vec4(u_OutlineColor, 1.0);
     
         // TODO: Set o.normal & o.worldPosition
-
-        // Check if the quad is facing the camera
-        // IFF dot(cross(A-B,C-A), A - ViewDir) > 0
-        // If not - we need to flip winding order
-        vec3 N = cross(v[0] - v[1], v[2] - v[0]);
-        vec4 worldPos = u_MVPMatrix * vec4(v[0], 1.0);
-        float NdotV = dot(N, worldPos.xyz - u_CameraMatrix[3].xyz);
-    
-        if (NdotV > 0) {
-            for (int idx = 0; idx < 4; idx++) {
-                gl_Position = u_MVPMatrix * vec4(v[idx], 1.0);
-                EmitVertex();
-            }
-        } else { // Flip winding order
-            gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
-            EmitVertex();
-        }
         
-        EndPrimitive();
+        emitQuad(v);
     }
 
     struct creaseOutput {
@@ -319,12 +338,14 @@ GLSLShader GS // Geometry
         vec3 eV;
         vec3 sN;
         vec3 eN;
+        vec3 binormal;
     };
 
-    creaseOutput crease(vec3 v0, vec3 v1, float s0, float s1, vec3 n0, vec3 n1) {
+    creaseOutput crease(vec3 v0, vec3 v1, vec3 v2, float s0, float s1, vec3 n0, vec3 n1) {
         creaseOutput result;
 
         result.valid = false;
+        result.binormal = vec3(0, 0, 0);
 
         if (s0 > 0 && s1 > 0) {
             result.valid = true;
@@ -332,6 +353,16 @@ GLSLShader GS // Geometry
             result.eV = v1;
             result.sN = n0;
             result.eN = n1;
+
+            // Figure out which tangent to follow based
+            float dot20 = dot(v2, v0);
+            float dot21 = dot(v2, v1);
+
+            if (dot20 < dot21) {
+                result.binormal = v2 - v0;
+            } else {
+                result.binormal = v2 - v1;
+            }
         }
 
         return result;
@@ -343,9 +374,16 @@ GLSLShader GS // Geometry
         
         vec3 v[4];
 
-        vec3 up = normalize(c.sV - c.eV);
-        vec3 right = cross(up, c.sN);
+        // vec3 cameraDir = normalize(u_CameraMatrix[3].xyz);
+
+        // vec3 up = normalize(c.sV - c.eV);
+        // vec3 look = u_CameraMatrix[3].xyz - c.sV;
+        // look.y = 0;
+        // look = normalize(look);
+
+        // vec3 right = cross(up, look);
         
+
         // TODO: ns/ne should NOT be perpendicular to the face normal that we're drawing along.
         // instead, this should be flush with the view space.
         float scale = u_OutlineScale * 0.5;
@@ -355,66 +393,60 @@ GLSLShader GS // Geometry
         // v[2] = vec3(c.start) + c.normal * scale;
         // v[3] = vec3(c.end) + c.normal * scale;
         
-        // v[0] = vec3(c.sV + right); // + offset;
-        // v[1] = vec3(c.eV + right * scale) + offset;
-        // v[2] = vec3(c.sV) + offset;
-        // v[3] = vec3(c.eV) + offset * 10;
+        // v[0] = vec3(c.sV + right);
+        // v[1] = vec3(c.eV + right);
+        // v[2] = vec3(c.sV);
+        // v[3] = vec3(c.eV);
+
+        vec3 topRight = normalize(cross(c.sV - c.eV, c.sN));
+        vec3 bottomRight = normalize(cross(c.sV - c.eV, c.eN));
         
-        v[0] = vec3(c.sV + u_OutlineScale * normalize(c.sN));
-        v[1] = vec3(c.eV + u_OutlineScale * normalize(c.eN));
-        v[2] = vec3(c.sV);
-        v[3] = vec3(c.eV);
+        v[0] = vec3(c.sV + u_OutlineScale * topRight * 0.5);
+        v[1] = vec3(c.eV + u_OutlineScale * bottomRight * 0.5);
+        v[2] = vec3(c.sV + u_OutlineScale * topRight * -0.5);
+        v[3] = vec3(c.eV + u_OutlineScale * bottomRight * -0.5);
 
         // Set color information
         o.color = vec4(1, 1, 0, 1);
-    
-        // TODO: Set o.normal & o.worldPosition
 
-        // Check if the quad is facing the camera
-        // IFF dot(cross(A-B,C-A), A - ViewDir) > 0
-        // If not - we need to flip winding order
-        vec3 N = cross(v[0] - v[1], v[2] - v[0]);
-        vec4 worldPos = u_MVPMatrix * vec4(v[0], 1.0);
-        float NdotV = dot(N, worldPos.xyz - u_CameraMatrix[3].xyz);
-    
-        if (NdotV > 0) {
-            for (int idx = 0; idx < 4; idx++) {
-                gl_Position = u_MVPMatrix * vec4(v[idx], 1.0);
-                EmitVertex();
-            }
-        } else { // Flip winding order
-            gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
-            EmitVertex();
-        }
-        
-        EndPrimitive();
+        // TODO: Set o.normal & o.worldPosition
+        // emitQuad(v);
+
+
+        // VERRRRRY slight offset so we overlap edges drawn for the source tri
+        vec3 start = c.sV + c.sN * 0.0001;
+        vec3 end = c.eV + c.eN * 0.0001;
+
+        // Test triangle pointing from start down the binormal
+        o.color = vec4(1, 0, 1, 1);
+        emitTri(start, start + normalize(c.binormal) * 0.1, start + c.sN * 0.01);
+
+        // Test triangle pointing from start to end
+        o.color = vec4(0, 1, 1, 1);
+        emitTri(start, end, start + c.sN * 0.01);
+
+        // 24 verts
     }
 
     void main()
     {   
         if (!u_SilhouetteOnly) {
             // Emit input vertices
-            for (int idx = 0; idx < 3; idx++) {
-                // o.color = i[idx].color; // * s.valid;
-                o.color = vec4(i[idx].sum, 0, 0, 1);
-                o.normal = i[idx].normal;
-                o.worldPosition = u_MVPMatrix * vec4(i[idx].position, 1.0);
+            // for (int idx = 0; idx < 3; idx++) {
+            //     // o.color = i[idx].color; // * s.valid;
+            //     o.color = vec4(i[idx].sum, 0, 0, 1);
+            //     o.normal = i[idx].normal;
+            //     o.worldPosition = u_MVPMatrix * vec4(i[idx].position, 1.0);
                 
-                gl_Position = o.worldPosition;
+            //     gl_Position = o.worldPosition;
 
-                EmitVertex();
-            }
+            //     EmitVertex();
+            // }
 
-            EndPrimitive();
+            // EndPrimitive();
+            
+            o.color = vec4(0.2, 0.2, 0.2, 1);
+            emitTri(i[0].position, i[1].position, i[2].position);
         }
         
         // See note in TCS about this calculation happening here...
@@ -432,7 +464,7 @@ GLSLShader GS // Geometry
 
         // 0 -> 1 crease edge
         c = crease(
-            i[0].position, i[1].position, 
+            i[0].position, i[1].position, i[2].position,
             i[0].sum, i[1].sum,
             i[0].normal, i[1].normal
         );
@@ -441,27 +473,29 @@ GLSLShader GS // Geometry
             emitCreaseQuad(c);
         }
 
-        // 1 -> 2 crease edge
-        c = crease(
-            i[1].position, i[2].position, 
-            i[1].sum, i[2].sum,
-            i[1].normal, i[2].normal
-        );
+        // // 1 -> 2 crease edge
+        // if (!c.valid) {
+        //     c = crease(
+        //         i[1].position, i[2].position, i[0].position,
+        //         i[1].sum, i[2].sum,
+        //         i[1].normal, i[2].normal
+        //     );
 
-        if (c.valid) {
-            emitCreaseQuad(c);
-        }
+        //     if (c.valid) {
+        //         emitCreaseQuad(c);
+        //     }
+        // }
+        
+        // // 2 -> 0 crease edge
+        // c = crease(
+        //     i[2].position, i[0].position, i[1].position,
+        //     i[2].sum, i[0].sum,
+        //     i[2].normal, i[0].normal
+        // );
 
-        // 2 -> 0 crease edge
-        c = crease(
-            i[2].position, i[0].position, 
-            i[2].sum, i[0].sum,
-            i[2].normal, i[0].normal
-        );
-
-        if (c.valid) {
-            emitCreaseQuad(c);
-        }
+        // if (c.valid) {
+        //     emitCreaseQuad(c);
+        // }
     }
 }
 
