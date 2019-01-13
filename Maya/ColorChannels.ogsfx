@@ -1,0 +1,79 @@
+#version 410
+
+#include "Utility.ogsfh"
+// #include "Passthrough.ogsfh"
+
+attribute vs_in {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : COLOR0;
+};
+ 
+attribute vs_to_tcs {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : TEXCOORD0;
+};
+
+attribute tcs_to_tes {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : TEXCOORD0;
+};
+
+attribute tes_to_gs {
+    vec3 position : POSITION;
+	vec3 normal : NORMAL;
+    vec4 color : TEXCOORD0;
+};
+
+attribute gs_to_ps {
+    vec4 worldPosition : POSITION;
+    vec3 normal : NORMAL;
+    vec4 color : TEXCOORD0;
+};
+
+attribute ps_out {
+    vec4 color : TEXCOORD0;
+};
+
+GLSLShader VS
+{
+    void main()
+    {
+        o.position = position;
+        o.normal = normal;
+        o.color = color;
+
+        gl_Position = u_MVPMatrix * vec4(position, 1);
+    }
+}
+
+GLSLShader PS
+{
+    void main()
+    {
+        float alpha = i.color.a; // step(i.color.a, 0.999);
+        if (alpha < 0.05) {
+            discard;
+        }
+
+        color = vec4(alpha, alpha, alpha, 1);
+    }
+}
+
+technique Main
+<
+    string Transparency = "Opaque";
+    // string index_buffer_type = "GLSL_PNAEN9";
+>
+{
+	pass p0
+	{
+		VertexShader (in vs_in, out vs_to_tcs o) = VS;
+        // TessControlShader (in vs_to_tcs i, out tcs_to_tes o) = TCS_Passthrough;
+        // TessEvaluationShader (in tcs_to_tes i, out tes_to_gs o) = TES_Passthrough;
+        // GeometryShader (in tes_to_gs i, out gs_to_ps o) = GS_Passthrough;
+		PixelShader (in vs_to_tcs i, out ps_out) = PS;
+	}
+}

@@ -10,7 +10,7 @@ GLSLShader VS_Passthrough
     {
         o.position = position;
         o.normal = normal;
-        o.color = vec4(1, 1, 1, 1);
+        o.color = color;
     }
 }
 
@@ -57,11 +57,9 @@ GLSLShader TES_Passthrough
                      i[1].color.xyz * V +
                      i[2].color.xyz * W;
 
-        o.worldPosition = u_MVPMatrix * vec4(position, 1.0);
+        o.position = position;
         o.normal = normal;
         o.color = vec4(color, 1.0);
-
-        gl_Position = o.worldPosition;
     }
 }
 
@@ -75,7 +73,7 @@ GLSLShader GS_Passthrough
         for (int idx = 0; idx < 3; idx++) {
             o.color = i[idx].color;
             o.normal = i[idx].normal;
-            o.worldPosition = i[idx].worldPosition;
+            o.worldPosition = u_MVPMatrix * vec4(i[idx].position, 1);
 
             gl_Position = o.worldPosition;
             EmitVertex();
