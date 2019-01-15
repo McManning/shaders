@@ -1,35 +1,17 @@
 #version 410
 
 #include "Utility.ogsfh"
-// #include "Passthrough.ogsfh"
+#include "Settings.ogsfh"
 
-attribute vs_in {
+attribute appdata {
     vec3 position : POSITION;
 	vec3 normal : NORMAL;
     vec4 color : COLOR0;
 };
  
-attribute vs_to_tcs {
-    vec3 position : POSITION;
-	vec3 normal : NORMAL;
-    vec4 color : TEXCOORD0;
-};
-
-attribute tcs_to_tes {
-    vec3 position : POSITION;
-	vec3 normal : NORMAL;
-    vec4 color : TEXCOORD0;
-};
-
-attribute tes_to_gs {
-    vec3 position : POSITION;
-	vec3 normal : NORMAL;
-    vec4 color : TEXCOORD0;
-};
-
-attribute gs_to_ps {
+attribute vs_to_ps {
     vec4 worldPosition : POSITION;
-    vec3 normal : NORMAL;
+	vec3 worldNormal : NORMAL;
     vec4 color : TEXCOORD0;
 };
 
@@ -41,8 +23,8 @@ GLSLShader VS
 {
     void main()
     {
-        o.position = position;
-        o.normal = normal;
+        o.worldPosition = u_ModelMatrix * vec4(position, 1);
+        o.worldNormal = (u_ModelMatrix * vec4(normal, 0)).xyz;
         o.color = color;
 
         gl_Position = u_MVPMatrix * vec4(position, 1);
@@ -51,29 +33,174 @@ GLSLShader VS
 
 GLSLShader PS
 {
-    void main()
+    /**
+     * @return 1 for fully in shadow, 0 for no contribution, anything in between for AA
+     */
+    float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos, float NdotL) 
     {
-        float alpha = i.color.a; // step(i.color.a, 0.999);
-        if (alpha < 0.05) {
-            discard;
+        vec4 viewPos = lightViewProj * worldPos;
+
+        // Correct for perspective
+        vec3 perspViewPos = viewPos.xyz / viewPos.w;
+
+        // No contribution if we're outside the light's view 
+        if (perspViewPos.x < -1 || 
+            perspViewPos.x > 1 || 
+            perspViewPos.y < -1 || 
+            perspViewPos.y > 1 || 
+            perspViewPos.z < -1 || 
+            perspViewPos.z > 1
+        ) {
+            return 0;
         }
 
-        color = vec4(alpha, alpha, alpha, 1);
+        // Transform texture sample location from [-1, 1] to [0, 1] in UV coordinates
+        vec2 uv = perspViewPos.xy * 0.5 + 0.5;
+
+        // Position's depth from the light view
+        float depth = perspViewPos.z - (0.01 / viewPos.w);
+
+        // Sample depth map from light0 view and don't contribute if 
+        // our depth is further from the light than sampled depth
+        // Note that Maya only has depth information in the x
+        // vec4 sampled = textureLod(light0ShadowMapSampler, uv, 0);
+
+        vec4 sampled = blur9(
+            light0ShadowMapSampler, 
+            uv, 
+            vec2(512.0, 512.0) * 1.0, 
+            perspViewPos.xy * 2.0
+        );
+
+        // tan(acos(NdotL)) is used to modify our bias based on the 
+        // slope for curved surfaces that end up artifacting
+        // Source: http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/
+        float bias = tan(acos(NdotL));
+        bias = clamp(bias, 0.0, 0.01);
+
+        // Not occluded, no shadow contribution on the surface
+        if (depth - sampled.x < bias) {
+            return 0;
+            // return bias - (depth - sampled.x);
+            return smoothstep(0.0, 0.1 * (1.0 - NdotL), bias - (depth - sampled.x));
+        }
+
+        return 1.0;
+    }
+
+    /**
+     * PCF variation for smoothing shadows
+     */
+    float calcShadowFactor(mat4 lightViewProj, vec4 worldPos)
+    {
+        vec4 viewPos = lightViewProj * worldPos;
+        vec3 perspViewPos = viewPos.xyz / viewPos.w;
+
+        vec2 uv = 0.5 * perspViewPos.xy + 0.5;
+
+        // Position's depth from the light view
+        float depth = perspViewPos.z - (0.01 / viewPos.w);
+        
+        // 2048 = shadow map size
+        float scale = 1.0 / 2048.0;
+        float factor = 0.0;
+
+        // 3x3 kernel sampling
+        for (int y = -1 ; y <= 1 ; y++) {
+            for (int x = -1 ; x <= 1 ; x++) {
+                vec2 offset = vec2(x, y) * scale;
+                factor += depth - texture(light0ShadowMapSampler, uv + offset).x;
+            }
+        }
+
+        return (0.5 + (factor / 18.0));
+    } 
+
+    void main()
+    {
+        vec3 viewDir = normalize(u_CameraMatrix[3].xyz - i.worldPosition.xyz);
+        vec3 normal = normalize(i.worldNormal);
+
+        // Diffuse light
+        float NdotL = dot(-light0Dir, normal);
+        
+        // NdotL above 0.005, will be 1. When below 0, will be 0. 
+        // All other values are smoothed between 0 and 0.005
+        float intensity = smoothstep(0.0, 0.01, NdotL);
+
+        // Specular
+        vec3 halfDir = normalize(-light0Dir + viewDir);
+        float NdotV = max(dot(normal, halfDir), 0.0);
+
+        float specIntensity = pow(NdotV * intensity, u_Glossiness * u_Glossiness);
+        vec3 specular = smoothstep(0.0, 0.005, specIntensity) * u_SpecularColor;
+
+        // Rim lighting
+        float rimDot = 1.0 -dot(viewDir, normal);
+        float rimIntensity = rimDot * pow(NdotL, 0.4);
+        vec3 rim = smoothstep(0.7 - 0.01, 0.7 + 0.01, rimIntensity) * vec3(1.0);
+
+        // Shadow contribution
+        // float shadow = calculateShadowsContribution(light0ViewProj, i.worldPosition, NdotL);
+        // shadow = smoothstep(0.0, 0.01, NdotL * shadow);
+
+        float shadow = 1.0 - calcShadowFactor(light0ViewProj, i.worldPosition);
+        float contrast = 150.0;
+        shadow = (shadow - 0.5) * contrast + 0.5;
+        shadow *= intensity;
+        shadow = smoothstep(0.0, 0.25, shadow);
+
+        // Composed color
+        vec3 c = i.color.xyz * (vec3(0.4) + specular + rim + (shadow));
+        color = vec4(c, 1.0);
+    }
+}
+
+// Shadow fragment shader - from the perspective of our light(s)
+GLSLShader shadowFrag
+{
+    /**
+     * Via Autodesk's Uber Shader
+     */
+    float getShadowDepth(vec4 worldPos, mat4 shadowProjMatrix) 
+    {
+        vec4 mul = shadowProjMatrix * worldPos;
+        float depthPerPixel = mul.z / mul.w;
+        return (depthPerPixel + fwidth(depthPerPixel)) * 0.5 + 0.5;
+    }
+
+    void main()
+    {
+        // Dotted shadow, for verifying we're actually running
+        // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
+
+        float depth = getShadowDepth(i.worldPosition, u_ShadowViewProj);
+        color = vec4(depth, depth, depth, 1);
     }
 }
 
 technique Main
 <
     string Transparency = "Opaque";
-    // string index_buffer_type = "GLSL_PNAEN9";
 >
 {
+    // Standard color pass and lighting
 	pass p0
+    <
+        string drawContext = "colorPass";
+    >
 	{
-		VertexShader (in vs_in, out vs_to_tcs o) = VS;
-        // TessControlShader (in vs_to_tcs i, out tcs_to_tes o) = TCS_Passthrough;
-        // TessEvaluationShader (in tcs_to_tes i, out tes_to_gs o) = TES_Passthrough;
-        // GeometryShader (in tes_to_gs i, out gs_to_ps o) = GS_Passthrough;
-		PixelShader (in vs_to_tcs i, out ps_out) = PS;
+		VertexShader (in appdata, out vs_to_ps o) = VS;
+		PixelShader (in vs_to_ps i, out ps_out) = PS;
 	}
+    
+    // Shadow cast pass
+    pass p1
+    <
+        string drawContext = "shadowPass";
+    >
+    {
+		VertexShader (in appdata, out vs_to_ps o) = VS;
+		PixelShader (in vs_to_ps i, out ps_out) = shadowFrag;
+    }
 }
