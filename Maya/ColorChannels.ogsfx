@@ -133,12 +133,18 @@ GLSLShader PS
         float NdotV = max(dot(normal, halfDir), 0.0);
 
         float specIntensity = pow(NdotV * intensity, u_Glossiness * u_Glossiness);
-        vec3 specular = smoothstep(0.0, 0.005, specIntensity) * u_SpecularColor;
+        vec3 specular = smoothstep(0.0, 0.0001, specIntensity) * u_SpecularColor;
+
+        // More tightening
+        specular = smoothstep(0.95, 1.0, specular);
 
         // Rim lighting
-        float rimDot = 1.0 -dot(viewDir, normal);
-        float rimIntensity = rimDot * pow(NdotL, 0.4);
-        vec3 rim = smoothstep(0.7 - 0.01, 0.7 + 0.01, rimIntensity) * vec3(1.0);
+        float rimDot = 1.0 - dot(viewDir, normal) - 0.25;
+        float rimIntensity = rimDot * pow(NdotL, 2);
+        vec3 rim = smoothstep(0.2 - 0.01, 0.2 + 0.01, rimIntensity) * vec3(1.0);
+
+        // Tighten edges again 
+        rim = smoothstep(0.0, 0.01, rim); 
 
         // Shadow contribution
         // float shadow = calculateShadowsContribution(light0ViewProj, i.worldPosition, NdotL);
@@ -151,7 +157,7 @@ GLSLShader PS
         shadow = smoothstep(0.0, 0.25, shadow);
 
         // Composed color
-        vec3 c = i.color.xyz * (vec3(0.4) + specular + rim + (shadow));
+        vec3 c = i.color.xyz * (vec3(0.6) + (specular + rim) * shadow + shadow);
         color = vec4(c, 1.0);
     }
 }
