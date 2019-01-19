@@ -227,33 +227,23 @@ GLSLShader GS_Wireframe
         // vec2 sPrev = prev.xy / prev.w;
         // vec2 sNext = next.xy / next.w;
 
-        // // Correct for aspect ratio
-        // p0.x /= aspect;
-        // p1.x /= aspect;
-
         // Generate a normal perpendicular to our direction in NDC
-        // vec2 dir = normalize(s1 - s0);
-
-        // Averaged direction between the two edges across v0 in screen space
-        // vec2 dir0 = normalize(v1 - prev);
-        // vec2 dir1 = normalize(next - v0);
-        vec2 dir0 = normalize(s1 - s0);
-        vec2 dir1 = normalize(s1 - s0);
-
-        vec2 n0 = normalize(vec2(-dir0.y, dir0.x));
-        vec2 n1 = normalize(vec2(-dir1.y, dir1.x));
+        vec2 dir = normalize(s1 - s0);
+        vec2 normal = normalize(vec2(-dir.y, dir.x));
 
         // Extrude from the center
         float thickness = u_CreaseScale;
-        n0 *= thickness * 0.5;
-        n1 *= thickness * 0.5;
+        normal *= thickness * 0.5;
+
+        // Correct for aspect ratio
+        normal.x *= aspect;
 
         // offset start/end vertices by thickness
-        vec4 jv0 = (v0 - normalize(v1 - v0) * u_CreaseScale * 0.5);
-        vec4 jv1 = (v1 + normalize(v1 - v0) * u_CreaseScale * 0.5);
+        vec4 jv0 = (v0 - normalize(v1 - v0) * u_CreaseScale);
+        vec4 jv1 = (v1 + normalize(v1 - v0) * u_CreaseScale);
 
-        vec4 jp0 = u_ViewProjMatrix * jv0;
-        vec4 jp1 = u_ViewProjMatrix * jv1;
+        vec4 jp0 = u_ViewProjMatrix * (v0);
+        vec4 jp1 = u_ViewProjMatrix * (v1);
 
         // gl_Position = p0;
         // EmitVertex();
@@ -268,22 +258,22 @@ GLSLShader GS_Wireframe
         o.dist = vec4(p0.xy, p1.xy);
         o.color = vec4(1, 0, 1, 1);
 
-        gl_Position = jp0 + vec4(n0 * -1, 0, 0);
+        gl_Position = jp0 + vec4(normal, 0, 0) * -1 + vec4(normal.y, -normal.x, 0, 0) * -1;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
         EmitVertex();
 
-        gl_Position = jp1 + vec4(n1 * -1, 0, 0);
+        gl_Position = jp1 + vec4(normal, 0, 0) * -1 + vec4(normal.y, -normal.x, 0, 0);
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
         EmitVertex();
 
-        gl_Position = jp0 + vec4(n0, 0, 0);
+        gl_Position = jp0 + vec4(normal, 0, 0) + vec4(normal.y, -normal.x, 0, 0) * -1;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
         EmitVertex();
         
-        gl_Position = jp1 + vec4(n1, 0, 0);
+        gl_Position = jp1 + vec4(normal, 0, 0) + vec4(normal.y, -normal.x, 0, 0);
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
         EmitVertex();
