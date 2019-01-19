@@ -4,10 +4,12 @@
 
 // Transformation matrices (named to Unity equivalents)
 uniform mat4 u_MVPMatrix : WorldViewProjection;
+uniform mat4 u_ProjMatrix : Projection;
 uniform mat4 u_ModelMatrix : World;
+uniform mat4 u_ViewMatrix : View;
 uniform mat4 u_NormalMatrix : WorldInverseTranspose;
 uniform mat4 u_CameraMatrix : ViewInverse;
-uniform mat4 u_ShadowViewProj : ViewProjection < string UIWidget = "None"; >;
+uniform mat4 u_ViewProjMatrix : ViewProjection < string UIWidget = "None"; >;
 
 #define CAMERA_POSITION u_CameraMatrix[3]
 

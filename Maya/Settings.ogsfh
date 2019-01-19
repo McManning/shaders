@@ -14,10 +14,30 @@ uniform vec3 u_Diffuse : DIFFUSE
     string UIWidget = "Color";
 > = {1, 0, 0};
 
+uniform vec3 u_ShadowInfluence
+<
+    string UIName = "Shaded";
+    string UIGroup = "Color";
+    string UIWidget = "Color";
+> = {0.4, 0.4, 0.4};
+
+uniform vec3 u_SpecularColor
+<
+	string UIName = "Specular";
+	string UIGroup = "Color";
+	string UIWidget = "Color";
+> = {0.9, 0.9, 0.9};
+
+uniform float u_Glossiness
+<
+	string UIName = "Glossiness";
+	string UIGroup = "Color";
+> = 32.0;
+
 // ---------------------------------------------
 // Silhouette/Crease Group
 // ---------------------------------------------
-uniform vec3 u_OutlineColor : DIFFUSE
+uniform vec3 u_OutlineColor
 <
     string UIName = "Color";
     string UIGroup = "Outline";
@@ -29,6 +49,12 @@ uniform float u_OutlineScale
     string UIName = "Scale";
     string UIGroup = "Outline";
 > = 1.0;
+
+uniform float u_CreaseScale
+<
+    string UIName = "Crease Scale";
+    string UIGroup = "Outline";
+> = 0.5;
 
 // ---------------------------------------------
 // Debug Group

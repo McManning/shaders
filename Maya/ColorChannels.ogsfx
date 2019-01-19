@@ -156,6 +156,9 @@ GLSLShader PS
         shadow *= intensity;
         shadow = smoothstep(0.0, 0.25, shadow);
 
+        // TODO: rim + spec should probably be greyscale and clamped together
+        // so we can't mix both on top of each other for 2x lighting.
+
         // Composed color
         vec3 c = i.color.xyz * (vec3(0.6) + (specular + rim) * shadow + shadow);
         color = vec4(c, 1.0);
