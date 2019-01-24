@@ -209,73 +209,73 @@ GLSLShader GS_Wireframe
         // Extract aspect ratio from the projection matrix
         // where m00 = 1/(aspect * tan(FOV / 2)) and m11 = 1/tan(FOV / 2)
         float aspect = u_ProjMatrix[0][0] / u_ProjMatrix[1][1];
+        float halfThickness = u_CreaseScale * 0.5;
 
-        // Offset original edge by their normal direction scaled 
-        // by the thickness of the crease we're going to draw.
+        // Offset crease edge by the source edge's normal direction  
+        // scaled by the thickness of the crease we're going to draw.
         // The 0.1 factor is to always keep it intersecting the surface
         // geometry a little bit and not entirely fly off.
-        v0 = v0 + vec4(normalize(wn0) * u_CreaseScale * 0.1, 0);
-        v1 = v1 + vec4(normalize(wn1) * u_CreaseScale * 0.1, 0);
+        // TODO: This is incorrect - as we should instead perfectly align with the 
+        // geometry. Otherwise, intersections cause roundedness within edges.
+        v0 = v0 + vec4(normalize(n0) * u_CreaseScale * 0.1, 0);
+        v1 = v1 + vec4(normalize(n1) * u_CreaseScale * 0.1, 0);
 
         // Convert points to projected + normalized device coords [-1, 1]
         vec4 p0 = u_ViewProjMatrix * v0;
         vec4 p1 = u_ViewProjMatrix * v1;
-        // vec4 pPrev = u_ViewProjMatrix * prev;
-        // vec4 pNext = u_ViewProjMatrix * next;
+
         vec2 s0 = p0.xy / p0.w;
         vec2 s1 = p1.xy / p1.w;
-        // vec2 sPrev = prev.xy / prev.w;
-        // vec2 sNext = next.xy / next.w;
-
-        // Generate a normal perpendicular to our direction in NDC
-        vec2 dir = normalize(s1 - s0);
-        vec2 normal = normalize(vec2(-dir.y, dir.x));
-
-        // Extrude from the center
-        float thickness = u_CreaseScale;
-        normal *= thickness * 0.5;
 
         // Correct for aspect ratio
-        normal.x *= aspect;
+        s0.x /= aspect;
+        s1.x /= aspect;
 
-        // offset start/end vertices by thickness
-        vec4 jv0 = (v0 - normalize(v1 - v0) * u_CreaseScale);
-        vec4 jv1 = (v1 + normalize(v1 - v0) * u_CreaseScale);
+        // Generate a right vector perpendicular to our forward direction in NDC
+        vec2 forward = normalize(s1 - s0);
+        vec2 right = vec2(-forward.y, forward.x);
 
-        vec4 jp0 = u_ViewProjMatrix * (v0);
-        vec4 jp1 = u_ViewProjMatrix * (v1);
-
-        // gl_Position = p0;
-        // EmitVertex();
-
-        // add some extra verts for testing
-        // gl_Position = p0 + vec4(-0.1 * aspect, 0.1, 0, 0);
+        // Extrude from the center
+        right *= halfThickness;
+        forward *= halfThickness;
 
         // Encode as a generated crease vertex
         // TODO: Distance should be encoded as well instead of in the
         // fragment shader so GL can interp. but fuck it, will do later.
-
         o.dist = vec4(p0.xy, p1.xy);
         o.color = vec4(1, 0, 1, 1);
+        
+        vec2 segmentDir = p0.xy - p1.xy;
+        segmentDir.x /= aspect;
 
-        gl_Position = jp0 + vec4(normal, 0, 0) * -1 + vec4(normal.y, -normal.x, 0, 0) * -1;
+        float segmentLen = length(segmentDir);
+        float uvSegmentLen = segmentLen / (u_CreaseScale * 2 + segmentLen);
+        
+        float uvHalfW = (1.0 - uvSegmentLen) * 0.5;
+
+        // color B channel is screen space segment length
+        o.color.b = uvHalfW;
+
+        vec4 aspectCorrect = vec4(aspect, 1, 0, 0);
+
+        gl_Position = p0 + (vec4(right, 0, 0) * -1 + vec4(forward, 0, 0) * -1) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
+        o.color.xy = vec2(0, 0);
         EmitVertex();
 
-        gl_Position = jp1 + vec4(normal, 0, 0) * -1 + vec4(normal.y, -normal.x, 0, 0);
+        gl_Position = p1 + (vec4(right, 0, 0) * -1 + vec4(forward, 0, 0)) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
+        o.color.xy = vec2(1, 0);
         EmitVertex();
 
-        gl_Position = jp0 + vec4(normal, 0, 0) + vec4(normal.y, -normal.x, 0, 0) * -1;
+        gl_Position = p0 + (vec4(right, 0, 0) + vec4(forward, 0, 0) * -1) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
+        o.color.xy = vec2(0, 1);
         EmitVertex();
         
-        gl_Position = jp1 + vec4(normal, 0, 0) + vec4(normal.y, -normal.x, 0, 0);
+        gl_Position = p1 + (vec4(right, 0, 0) + vec4(forward, 0, 0)) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        // o.color = vec4(distanceToLine(gl_Position.xyz, p0.xyz, p1.xyz), 0, 0, 1);
+        o.color.xy = vec2(1, 1);
         EmitVertex();
 
         EndPrimitive();
@@ -479,27 +479,28 @@ GLSLShader PS
 
         // color = vec4(vec3(d), 1);
         
+        // If alpha channel is nonzero, we're flagged as crease geometry
         if (i.color.a > 0.0001) {
-            // // decode segment line from color, worldpos is actually screen pos
+            // // decode segment line from color, worldpos is actually screen pos in this case
             d = distanceToSegment(i.worldPosition.xy, i.dist.xy, i.dist.zw);
 
-            // d  = 1 - smoothstep(0.01, 0.5 * 0.5, d);
-            d = 1 - step(u_CreaseScale * 0.5, d);
+            // Extract UV coordinates and edge half width from color
+            vec2 uv = i.color.rg;
+            float uvHalfW = i.color.b;
+            uv.y *= uvHalfW * 2;
 
-            // if (d > 0.05) {
-            //     discard;
-            // }
+            // Generate a screen-space capsule by discarding fragments
+            // that are further than uvHalfW from the crease edge
+            vec2 start = vec2(uvHalfW, uvHalfW);
+            vec2 end = vec2(1.0 - uvHalfW, uvHalfW);
 
-            if (d < 0.9) {
+            d = distanceToSegment(uv, start, end);
+            if (d > uvHalfW) {
                 discard;
             }
 
-            // // smooth it
-            // // d = 1.0 - d; // smoothstep(0.1, 0.2, d);
-            // color = vec4(vec3(0), 1);
-
-            color = vec4(d) * i.color;
-            // color = vec4(0.1);
+            // Compute final color for crease geometry
+            color.rgb = vec3(uv.x, 0, uv.y);
         } else {
             // discard;
             // draw the main color, but fade vertex edges on top of it
