@@ -157,10 +157,20 @@ GLSLShader GS_Wireframe
      */
     void drawCrease(vec4 v0, vec4 v1, vec3 n0, vec3 n1)
     {
+        float scale = u_CreaseScale;
+
+        // Scale linearly with distance
+        vec4 camPos = u_CameraMatrix[3];
+        scale *= distance(v0, camPos) * 0.1;
+
+        // TODO: In near distances, the closer point needs to be 
+        // scaled separately than the far point, else we end up 
+        // with incorrect transformations.
+
         // Extract aspect ratio from the projection matrix
         // where m00 = 1/(aspect * tan(FOV / 2)) and m11 = 1/tan(FOV / 2)
         float aspect = u_ProjMatrix[0][0] / u_ProjMatrix[1][1];
-        float halfThickness = u_CreaseScale * 0.5;
+        float halfThickness = scale * 0.5;
 
         // Offset crease edge by the source edge's normal direction  
         // scaled by the thickness of the crease we're going to draw.
@@ -168,8 +178,8 @@ GLSLShader GS_Wireframe
         // geometry a little bit and not entirely fly off.
         // TODO: This is incorrect - as we should instead perfectly align with the 
         // geometry. Otherwise, intersections cause roundedness within edges.
-        v0 = v0 + vec4(normalize(n0) * u_CreaseScale * 0.1, 0);
-        v1 = v1 + vec4(normalize(n1) * u_CreaseScale * 0.1, 0);
+        // v0 = v0 + vec4(normalize(n0) * u_CreaseScale * 0.1, 0);
+        // v1 = v1 + vec4(normalize(n1) * u_CreaseScale * 0.1, 0);
 
         // Convert points to projected + normalized device coords [-1, 1]
         vec4 p0 = u_ViewProjMatrix * v0;
@@ -177,6 +187,11 @@ GLSLShader GS_Wireframe
 
         vec2 s0 = p0.xy / p0.w;
         vec2 s1 = p1.xy / p1.w;
+
+        // Push projected z-depth toward the camera
+        // can't though - shows geo behind our mesh.
+        // p0.z -= 0.1;
+        // p1.z -= 0.1;
 
         // Correct for aspect ratio
         s0.x /= aspect;
@@ -200,7 +215,7 @@ GLSLShader GS_Wireframe
         segmentDir.x /= aspect;
 
         float segmentLen = length(segmentDir);
-        float uvSegmentLen = segmentLen / (u_CreaseScale * 2 + segmentLen);
+        float uvSegmentLen = segmentLen / (scale * 2 + segmentLen);
         
         float uvHalfW = (1.0 - uvSegmentLen) * 0.5;
 
@@ -209,24 +224,35 @@ GLSLShader GS_Wireframe
 
         vec4 aspectCorrect = vec4(aspect, 1, 0, 0);
 
+        // vec4 viewPos = u_ViewMatrix * v0;
+        // float depth = -viewPos.z;
+
         gl_Position = p0 + (vec4(right, 0, 0) * -1 + vec4(forward, 0, 0) * -1) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(0, 0);
+        
+        // gl_Position.z = p0.z - 0.01;
         EmitVertex();
 
         gl_Position = p1 + (vec4(right, 0, 0) * -1 + vec4(forward, 0, 0)) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(1, 0);
+        
+        // gl_Position.z = p1.z - 0.01;
         EmitVertex();
 
         gl_Position = p0 + (vec4(right, 0, 0) + vec4(forward, 0, 0) * -1) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(0, 1);
+        
+        // gl_Position.z = p0.z - 0.01;
         EmitVertex();
         
         gl_Position = p1 + (vec4(right, 0, 0) + vec4(forward, 0, 0)) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(1, 1);
+        
+        // gl_Position.z = p1.z - 0.01;
         EmitVertex();
 
         EndPrimitive();
@@ -286,7 +312,7 @@ GLSLShader GS_Wireframe
     /**
      * Draw the base triangle input
      */
-    void drawInputGeometry() 
+    void drawInputGeometry()
     {
         // triadj - 0, 2, 4 indices
         for (int idx = 0; idx < 6; idx += 2) {
@@ -296,10 +322,15 @@ GLSLShader GS_Wireframe
             o.worldNormal = input[idx].worldNormal;
             o.worldPosition = input[idx].worldPosition;
 
+            // vec4 viewPos = u_ViewMatrix * o.worldPosition;
+            // float depth = -viewPos.z;
+
             // Calculate opposite edge distance per vertex for wireframing
             o.dist = vec4(getOppositeEdgeDistanceVec(idx), 0);
 
+            // o.color = vec4(vec3(depth), 0);
             gl_Position = u_ViewProjMatrix * o.worldPosition;
+            // gl_Position.z = depth;
             EmitVertex();
         }
 
@@ -383,6 +414,8 @@ GLSLShader PS
             // Compute final color for crease geometry
             color.rgb = vec3(uv.x, 0, uv.y);
         } else {
+            discard;
+
             // Wireframe rendering by lerping between a wireframe 
             // color and our actual output color based on how close the
             // fragment is to a triangle edge
