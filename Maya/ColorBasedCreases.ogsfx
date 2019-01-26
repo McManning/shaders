@@ -109,6 +109,11 @@ GLSLShader GS_Wireframe
         EndPrimitive();
     }
 
+    bool isBackface(vec3 v0, vec3 v1, vec3 v2) {
+        vec3 N = cross(v1 - v0, v2 - v0);
+        return dot(u_CameraMatrix[3].xyz - v0, N) < 0;
+    }
+
     /**
      * Where the vertices are already in clip space
      */
@@ -212,8 +217,8 @@ GLSLShader GS_Wireframe
         
         float uvHalfW = (1.0 - uvSegmentLen) * 0.5;
 
-        // color B channel is screen space segment length
-        o.color.b = uvHalfW;
+        // color Z channel is screen space segment length
+        o.color.z = uvHalfW;
 
         vec4 aspectCorrect = vec4(aspect, 1, 0, 0);
 
@@ -333,6 +338,17 @@ GLSLShader GS_Wireframe
     void main()
     {
         drawInputGeometry();
+
+        // Don't calculate creases if we're a backface triangle
+        if (u_CullBackfaceCreases && 
+            isBackface(
+                input[0].worldPosition.xyz, 
+                input[1].worldPosition.xyz,
+                input[2].worldPosition.xyz
+            )
+        ) {
+            return;
+        }
 
         // If the entire triangle is marked with crease edges, ignore entirely.
         // It's at a junction we can't resolve.

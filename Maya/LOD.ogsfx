@@ -1,0 +1,90 @@
+#version 410
+
+uniform mat4 u_MVPMatrix : WorldViewProjection;
+uniform mat4 u_ModelMatrix : World;
+uniform mat4 u_NormalMatrix : WorldInverseTranspose;
+
+// Camera world space position would be u_CameraMatrix[3].xyz
+uniform mat4 u_CameraMatrix : ViewInverse;
+
+uniform float u_LOD1Distance
+<
+	string UIGroup = "LOD";
+	string UIName = "LOD1 Distance";
+> = 10.0;
+
+uniform float u_LOD2Distance
+<
+	string UIGroup = "LOD";
+	string UIName = "LOD2 Distance";
+> = 20.0;
+
+// ---------------------------------------------
+// Shader inputs/outputs
+// ---------------------------------------------
+attribute appdata
+{
+	vec3 vertex : POSITION;
+	vec3 normal : NORMAL;
+};
+
+attribute v2f
+{
+	vec3 vertex : POSITION;
+	vec3 normal : NORMAL;
+    vec4 col : COLOR0;
+};
+
+attribute frag_out
+{
+	vec4 col : COLOR0;
+};
+
+GLSLShader vert
+{
+	void main()
+	{
+		o.normal = normal;
+        o.vertex = vertex;
+
+        vec4 cam = u_CameraMatrix[3];
+        vec4 origin = u_ModelMatrix * vec4(0, 0, 0, 1);
+        
+        float d = distance(cam, origin);
+        o.col.rgb = vec3(d) * 0.001;
+    
+        int lod = 0;
+        if (d > u_LOD2Distance) {
+            lod = 2;
+        } else if (d > u_LOD1Distance) {
+            lod = 1;
+        }
+
+        if (lod < 1) { // LOD0
+            o.col = vec4(1, 0, 0, 1);
+        } else if (lod < 2) { // LOD1
+            o.col = vec4(0, 1, 0, 1);
+        } else if (lod < 3) { // LOD2
+            o.col = vec4(0, 0, 1, 1);
+        }
+
+        gl_Position = u_MVPMatrix * vec4(vertex, 1);
+	}
+}
+
+GLSLShader frag
+{
+	void main()
+	{
+        col = input.col;
+	}
+}
+
+technique Main
+{
+	pass p0
+	{
+		VertexShader (in appdata, out v2f o) = vert;
+		PixelShader (in v2f input, out frag_out) = frag;
+	}
+}

@@ -56,6 +56,12 @@ uniform float u_CreaseScale
     string UIGroup = "Outline";
 > = 0.5;
 
+uniform bool u_CullBackfaceCreases
+<
+	string UIName = "Cull Backface Creases";
+	string UIGroup = "Outline";
+> = true;
+
 // ---------------------------------------------
 // Debug Group
 // ---------------------------------------------
