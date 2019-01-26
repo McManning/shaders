@@ -164,9 +164,14 @@ GLSLShader GS_Wireframe
     {
         vec4 camPos = u_CameraMatrix[3];
         
-        // Scale linearly with distance
-        float scale0 = u_CreaseScale * distance(v0, camPos) * 0.1;
-        float scale1 = u_CreaseScale * distance(v1, camPos) * 0.1;
+        float scale0 = u_CreaseScale; 
+        float scale1 = u_CreaseScale; 
+
+        // Scale linearly with distance in view space
+        if (u_CreaseViewSpaceScale) {
+            scale0 *= distance(v0, camPos) * 0.1;
+            scale1 *= distance(v1, camPos) * 0.1;
+        }
 
         // Extract aspect ratio from the projection matrix
         // where m00 = 1/(aspect * tan(FOV / 2)) and m11 = 1/tan(FOV / 2)

@@ -54,7 +54,13 @@ uniform float u_CreaseScale
 <
     string UIName = "Crease Scale";
     string UIGroup = "Outline";
-> = 0.5;
+> = 0.2;
+
+uniform bool u_CreaseViewSpaceScale
+<
+	string UIName = "Uniform View Space Scale";
+	string UIGroup = "Outline";
+> = true;
 
 uniform bool u_CullBackfaceCreases
 <
