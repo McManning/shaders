@@ -212,7 +212,6 @@ GLSLShader GS_Wireframe
         // TODO: Distance should be encoded as well instead of in the
         // fragment shader so GL can interp. but fuck it, will do later.
         o.dist = vec4(p0.xy, p1.xy);
-        o.color = vec4(1, 0, 1, 1);
         
         vec2 segmentDir = p0.xy - p1.xy;
         segmentDir.x /= aspect;
@@ -300,16 +299,29 @@ GLSLShader GS_Wireframe
      * vertex ID ordering to ensure that the same crease isn't drawn by adjacent
      * triangles that operate on the same edge.
      *
+     * Vertex alpha painting may also be different levels to indicate what
+     * LOD the crease should be visible within. 
+     *
      * This MASSIVELY assumes the vertex indices match winding order.
      *
      * @param int idx Index of crease start vertex in GS inputs
      * @param int nextIdx Index of crease end vertex in GS inputs
+     * @param int lod Current LOD to check against
      *
      * @return boolean
      */
-    bool isValidCrease(int idx, int nextIdx) {
+    bool isValidCrease(int idx, int nextIdx, int lod) {
+        // TODO: less hardcoding.
+        float lowThreshold = 0.24; // LOD0 - 0.25
+        if (lod == 1) { // LOD1 - 0.75
+            lowThreshold = 0.74;
+        } else if (lod == 2) { // LOD2 - 1.0
+            lowThreshold = 0.99;
+        }
+
         return input[idx].id < input[nextIdx].id &&
-                input[idx].color.a > 0.99 && input[nextIdx].color.a > 0.99;
+                input[idx].color.a > lowThreshold && 
+                input[nextIdx].color.a > lowThreshold;
     }
 
     /**
@@ -340,6 +352,23 @@ GLSLShader GS_Wireframe
         EndPrimitive();
     }
 
+    /**
+     * Retrieve LOD of the current model
+     */
+    int getLOD() {
+        vec4 origin = u_ModelMatrix * vec4(0, 0, 0, 1);
+        float d = distance(u_CameraMatrix[3], origin);
+
+        int lod = 0;
+        if (d > u_LOD2Distance) {
+            lod = 2;
+        } else if (d > u_LOD1Distance) {
+            lod = 1;
+        }
+
+        return lod;
+    }
+
     void main()
     {
         drawInputGeometry();
@@ -361,11 +390,16 @@ GLSLShader GS_Wireframe
             return;
         }
         
+        int lod = getLOD();
+
         // For every crease edge, draw a billboarded prismoid
         for (int idx = 0; idx < 6; idx += 2) {
             int nextIdx = (idx + 2) % 6;
 
-            if (isValidCrease(idx, nextIdx)) {
+            // Copy forward to all crease geometry
+            o.color = input[idx].color;
+
+            if (isValidCrease(idx, nextIdx, lod)) {
                 drawCrease(
                     input[idx].worldPosition, 
                     input[nextIdx].worldPosition,
@@ -427,6 +461,17 @@ GLSLShader PS
 
             // Compute final color for crease geometry
             color.rgb = vec3(uv.x, 0, uv.y);
+            
+            // Color creases by LOD 
+            if (u_DebugCreaseLOD) {
+                if (i.color.a < 0.26) { //  LOD0 - White
+                    color.rgb = vec3(1);
+                } else if (i.color.a < 0.76) { // LOD1 - Grey
+                    color.rgb = vec3(0.25);
+                } else { // LOD2 - Dark Grey
+                    color.rgb = vec3(0.01);
+                }
+            }
         } else {
             discard;
 

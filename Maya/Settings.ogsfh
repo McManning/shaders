@@ -5,6 +5,22 @@
 #define _SETTINGS_OGSFH_
 
 // ---------------------------------------------
+// LOD Group
+// ---------------------------------------------
+
+uniform float u_LOD1Distance
+<
+	string UIGroup = "LOD";
+	string UIName = "LOD1 Distance";
+> = 10.0;
+
+uniform float u_LOD2Distance
+<
+	string UIGroup = "LOD";
+	string UIName = "LOD2 Distance";
+> = 20.0;
+
+// ---------------------------------------------
 // Color Group
 // ---------------------------------------------
 uniform vec3 u_Diffuse : DIFFUSE
@@ -81,6 +97,12 @@ uniform bool u_SilhouetteOnly
 <
     string UIName = "Silhouette Only";
     string UIGroup = "Debug";
+> = false;
+
+uniform bool u_DebugCreaseLOD
+<
+	string UIName = "Color Creases by LOD";
+	string UIGroup = "Debug";
 > = false;
 
 // ---------------------------------------------
