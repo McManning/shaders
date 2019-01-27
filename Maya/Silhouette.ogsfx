@@ -237,8 +237,8 @@ GLSLShader geom
         int i;
 
         for (i = 0; i < 3; i ++) {
-            o.col = vec4(input[i].normal, 1.0);
-            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1.0);
+            o.col = vec4(gsin[i].normal, 1.0);
+            gl_Position = u_MVPMatrix * vec4(gsin[i].vertex, 1.0);
 		    EmitVertex();
         }
         
@@ -250,8 +250,8 @@ GLSLShader geom
         int i;
 
         for (i = 0; i < 5; i += 2) {
-            o.col = vec4(input[i].normal, 1.0);
-            gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1.0);
+            o.col = vec4(gsin[i].normal, 1.0);
+            gl_Position = u_MVPMatrix * vec4(gsin[i].vertex, 1.0);
 		    EmitVertex();
         }
         
@@ -268,9 +268,9 @@ GLSLShader geom
         int i1 = 2;
         int i2 = 4;
 
-        float d0 = input[i0].NdotV;
-        float d1 = input[i1].NdotV;
-        float d2 = input[i2].NdotV;
+        float d0 = gsin[i0].NdotV;
+        float d1 = gsin[i1].NdotV;
+        float d2 = gsin[i2].NdotV;
 
         // Offset NdotV by 0.1 so we always have a nonzero.
         // .: +1 for >= 0, -1 for < 0
@@ -278,13 +278,13 @@ GLSLShader geom
         float s1 = sign(d1 + 0.0001);
         float s2 = sign(d2 + 0.0001);
 
-        vec3 v0 = input[i0].vertex;
-        vec3 v1 = input[i1].vertex;
-        vec3 v2 = input[i2].vertex;
+        vec3 v0 = gsin[i0].vertex;
+        vec3 v1 = gsin[i1].vertex;
+        vec3 v2 = gsin[i2].vertex;
 
-        vec3 n0 = input[i0].normal;
-        vec3 n1 = input[i1].normal;
-        vec3 n2 = input[i2].normal;
+        vec3 n0 = gsin[i0].normal;
+        vec3 n1 = gsin[i1].normal;
+        vec3 n2 = gsin[i2].normal;
 
         // Start/end positions
         vec3 xs = vec3(0,0,0);
@@ -347,16 +347,16 @@ GLSLShader geom
 
                 if (u_Debug) {
                     o.col = lerp(
-                        lerp(vec4(input[i].normal, 1.0), input[i].col, u_UseVertColor),
+                        lerp(vec4(gsin[i].normal, 1.0), gsin[i].col, u_UseVertColor),
                         vec4(0, 0, 0, 1),
                         silh
                     );
                 }
 
-                o.worldNormal = (u_ModelMatrix * vec4(input[i].normal, 0)).xyz;
-                o.worldPosition =  (u_ModelMatrix * vec4(input[i].vertex, 1)).xyz;
+                o.worldNormal = (u_ModelMatrix * vec4(gsin[i].normal, 0)).xyz;
+                o.worldPosition =  (u_ModelMatrix * vec4(gsin[i].vertex, 1)).xyz;
 
-                gl_Position = u_MVPMatrix * vec4(input[i].vertex, 1);
+                gl_Position = u_MVPMatrix * vec4(gsin[i].vertex, 1);
                 EmitVertex();
             }
 
@@ -515,7 +515,7 @@ technique Main
 	pass p0
 	{
 		VertexShader (in appdata, out v2g o) = vert;
-		GeometryShader (in v2g input, out g2f o) = geom;
+		GeometryShader (in v2g gsin, out g2f o) = geom;
 		PixelShader (in g2f i, out ps_out) = frag;
 	}
 }
