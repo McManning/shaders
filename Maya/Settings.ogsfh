@@ -60,9 +60,9 @@ uniform vec3 u_OutlineColor
     string UIWidget = "Color";
 > = {1, 1, 1};
 
-uniform float u_OutlineScale
+uniform float u_SilhouetteScale
 <
-    string UIName = "Scale";
+    string UIName = "Silhouette Scale";
     string UIGroup = "Outline";
 > = 1.0;
 
@@ -93,23 +93,42 @@ uniform bool u_CullBackfaceCreases
 //     string UIGroup = "Debug";
 // > = false;
 
-uniform bool u_SilhouetteOnly
+#define GEOMETRY_DRAW_COLOR 1
+#define GEOMETRY_DRAW_WIREFRAME 2
+uniform int u_GeometryDrawMode
 <
-    string UIName = "Silhouette Only";
-    string UIGroup = "Debug";
-> = false;
-
-uniform bool u_CreaseOnly
-<
-	string UIName = "Creases Only";
+	string UIName = "Geometry Draw Mode";
 	string UIGroup = "Debug";
-> = false;
+	string UIFieldNames = "None:Color:Wireframe";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = 1;
 
-uniform bool u_DebugCreaseLOD
+#define SILHOUETTE_DRAW_COLOR 1
+#define SILHOUETTE_DRAW_UVS 2
+uniform int u_SilhouetteDrawMode
 <
-	string UIName = "Color Creases by LOD";
+	string UIName = "Silhouette Draw Mode";
 	string UIGroup = "Debug";
-> = false;
+	string UIFieldNames = "None:Color:UVs";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = 1;
+
+#define CREASE_DRAW_COLOR 1
+#define CREASE_DRAW_UVS 2
+#define CREASE_DRAW_LOD 3
+uniform int u_CreaseDrawMode
+<
+	string UIName = "Crease Draw Mode";
+	string UIGroup = "Debug";
+	string UIFieldNames = "None:Color:UVs:LOD";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = 1;
 
 // ---------------------------------------------
 // Light 0 Group
