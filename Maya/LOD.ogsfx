@@ -76,7 +76,7 @@ GLSLShader frag
 {
 	void main()
 	{
-        col = input.col;
+        col = i.col;
 	}
 }
 
@@ -85,6 +85,6 @@ technique Main
 	pass p0
 	{
 		VertexShader (in appdata, out v2f o) = vert;
-		PixelShader (in v2f input, out frag_out) = frag;
+		PixelShader (in v2f i, out frag_out) = frag;
 	}
 }

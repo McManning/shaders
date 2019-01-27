@@ -99,6 +99,12 @@ uniform bool u_SilhouetteOnly
     string UIGroup = "Debug";
 > = false;
 
+uniform bool u_CreaseOnly
+<
+	string UIName = "Creases Only";
+	string UIGroup = "Debug";
+> = false;
+
 uniform bool u_DebugCreaseLOD
 <
 	string UIName = "Color Creases by LOD";
