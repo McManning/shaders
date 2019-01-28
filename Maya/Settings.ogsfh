@@ -69,7 +69,7 @@ uniform float u_SilhouetteScale
 <
     string UIName = "Silhouette Scale";
     string UIGroup = "Outline";
-> = 1.0;
+> = 0.2;
 
 uniform float u_CreaseScale
 <
@@ -87,7 +87,7 @@ uniform bool u_CullBackfaceCreases
 <
 	string UIName = "Cull Backface Creases";
 	string UIGroup = "Outline";
-> = true;
+> = false;
 
 uniform float u_OutlineOffset
 <
@@ -108,7 +108,7 @@ uniform float u_SurfaceInsetScale
 <
 	string UIName = "Inset Scale";
 	string UIGroup = "Debug";
-> = 0;
+> = 0.137;
 
 #define GEOMETRY_DRAW_COLOR 1
 #define GEOMETRY_DRAW_WIREFRAME 2
