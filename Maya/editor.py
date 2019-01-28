@@ -38,6 +38,14 @@ def crease(alpha=1.0):
     cmds.polyColorPerVertex(a=alpha)
     cmds.select(selected)
 
+    """TODO: Also apply the colorset to the shader if not already. E.g.:
+
+    polyColorSet -currentColorSet -colorSet "crease";
+    setAttr -type "string" GLSLShader1.Color0_Source "color:crease";
+    AEhwShader_varyingParameterUpdate(1,1,0);
+    updateRenderOverride;
+    """
+
 def selectCreases(alpha=None):
     """Select all crease geometry in the object with the given alpha, or any non-zero alpha"""
     selected = cmds.ls(selection=True)
@@ -116,7 +124,8 @@ def addMiscGroup(window):
     cmds.rowLayout(numberOfColumns=4)
 
     cmds.button(label="Soften all edges", command="softenModel()")
-    
+    cmds.button(label="Delete History", command="cmds.DeleteHistory()")
+
     cmds.setParent("..")
     cmds.setParent("..")
 
