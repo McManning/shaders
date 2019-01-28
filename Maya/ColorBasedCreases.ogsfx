@@ -241,7 +241,7 @@ GLSLShader GS
         float startScale = u_SilhouetteScale;
         float endScale = u_SilhouetteScale;
 
-        if (u_CreaseViewSpaceScale) {
+        if (u_OutlineViewSpaceScale) {
             startScale *= distance(s.startPos, camPos) * 0.1;
             endScale *= distance(s.endPos, camPos) * 0.1;
         }
@@ -304,12 +304,20 @@ GLSLShader GS
         float scale0 = u_CreaseScale; 
         float scale1 = u_CreaseScale; 
 
+        // v0 += normalize(camPos - v0) * u_SurfaceInsetScale;
+        // v1 += normalize(camPos - v1) * u_SurfaceInsetScale;
+
         // Scale linearly with distance in view space
-        if (u_CreaseViewSpaceScale) {
+        if (u_OutlineViewSpaceScale) {
             scale0 *= distance(v0, camPos) * 0.1;
             scale1 *= distance(v1, camPos) * 0.1;
         }
 
+        // Offset input vertices by their normals to use as the
+        // origin edge for the crease to be adjacent to
+        v0.xyz += n0 * scale0 * u_SurfaceInsetScale;
+        v1.xyz += n1 * scale1 * u_SurfaceInsetScale;
+        
         // Extract aspect ratio from the projection matrix
         // where m00 = 1/(aspect * tan(FOV / 2)) and m11 = 1/tan(FOV / 2)
         float aspect = u_ProjMatrix[0][0] / u_ProjMatrix[1][1];
@@ -348,7 +356,7 @@ GLSLShader GS
         // Encode as a generated crease vertex
         // TODO: Distance should be encoded as well instead of in the
         // fragment shader so GL can interp. but fuck it, will do later.
-        o.dist = vec4(p0.xy, p1.xy);
+        // o.dist = vec4(p0.xy, p1.xy);
         
         vec2 segmentDir = p0.xy - p1.xy;
         segmentDir.x /= aspect;
@@ -366,32 +374,38 @@ GLSLShader GS
         // vec4 viewPos = u_ViewMatrix * v0;
         // float depth = -viewPos.z;
 
+        float zoffset = -u_OutlineOffset;//-halfW0;
+
         gl_Position = p0 + (vec4(right, 0, 0) * -halfW0 + vec4(forward, 0, 0) * -halfW0) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(0, 0);
         
-        // gl_Position.z = p0.z - 0.01;
+        gl_Position.z += zoffset;
+        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
 
         gl_Position = p1 + (vec4(right, 0, 0) * -halfW1 + vec4(forward, 0, 0) * halfW1) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(1, 0);
         
-        // gl_Position.z = p1.z - 0.01;
+        gl_Position.z += zoffset;
+        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
 
         gl_Position = p0 + (vec4(right, 0, 0) * halfW0 + vec4(forward, 0, 0) * -halfW0) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(0, 1);
         
-        // gl_Position.z = p0.z - 0.01;
+        gl_Position.z += zoffset;
+        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
         
         gl_Position = p1 + (vec4(right, 0, 0) * halfW1 + vec4(forward, 0, 0) * halfW1) * aspectCorrect;
         o.worldPosition = vec4(gl_Position.xy, 0, 1);
         o.color.xy = vec2(1, 1);
         
-        // gl_Position.z = p1.z - 0.01;
+        gl_Position.z += zoffset;
+        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
 
         EndPrimitive();
@@ -479,25 +493,29 @@ GLSLShader GS
     /**
      * Draw the base triangle input
      */
-    void drawInputGeometry()
-    {
+    void drawInputGeometry() {
         // triadj - 0, 2, 4 indices
         for (int idx = 0; idx < 6; idx += 2) {
             // Color without the type encoding
-            // o.color = vec4(gsin[idx].color.rgb, 0);
-            o.color = vec4(0.5, 0.5, 0.5, 0);
+            // TODO: RGB here has no usage, since we're using
+            // a uniform for color data. Reuse for something?
+            o.color = vec4(gsin[idx].color.rgb, 0);
             o.worldNormal = (u_ModelMatrix * vec4(gsin[idx].normal, 0)).xyz;
             o.worldPosition = gsin[idx].worldPosition;
+
+            // slight inset
+            // o.worldPosition.xyz -= normalize(gsin[idx].normal) * u_SurfaceInsetScale;
 
             // vec4 viewPos = u_ViewMatrix * o.worldPosition;
             // float depth = -viewPos.z;
 
-            // Calculate opposite edge distance per vertex for wireframing
-            o.dist = vec4(getOppositeEdgeDistanceVec(idx), 0);
-
             // o.color = vec4(vec3(depth), 0);
             gl_Position = u_ViewProjMatrix * o.worldPosition;
             // gl_Position.z = depth;
+            
+            // Calculate opposite edge distance per vertex for wireframing
+            o.dist = vec4(getOppositeEdgeDistanceVec(idx), gl_Position.z);
+            // throwing z as a rider to test render :^)
             EmitVertex();
         }
 
@@ -521,8 +539,7 @@ GLSLShader GS
         return lod;
     }
 
-    void main()
-    {
+    void main() {
         if (u_GeometryDrawMode > 0) {
             drawInputGeometry();
         }
@@ -544,14 +561,15 @@ GLSLShader GS
                 // drawSilhouette(s);
 
                 // Copy color forward to silhouette geometry.
-                // And set alpha to < 0.2 for detection in the PS
+                // And set alpha to 1.0 for detection in the PS
                 o.color = gsin[0].color;
-                o.color.a = 0.1;
+                o.color.a = 1.0;
 
                 drawCrease(
                     u_ModelMatrix * vec4(s.startPos, 1), 
                     u_ModelMatrix * vec4(s.endPos, 1), 
-                    vec3(0), vec3(0)
+                    s.startNormal,
+                    s.endNormal
                 );
             }
         }
@@ -590,8 +608,7 @@ GLSLShader GS
 
 GLSLShader PS
 {
-    float distanceToSegment(vec2 point, vec2 a, vec2 b) 
-    {
+    float distanceToSegment(vec2 point, vec2 a, vec2 b) {
         float dist = length(a - b);
         vec2 v = normalize(b - a);
         float t = dot(v, point - a);
@@ -611,12 +628,11 @@ GLSLShader PS
         return length(point - spinePoint);
     }
 
-    void main()
-    {
+    void main() {
         float d;
 
         // If alpha channel is nonzero, we're flagged as crease/silhouette geometry
-        if (i.color.a > 0.001) {
+        if (i.color.a >= 0.1) {
             // Extract UV coordinates and edge half width from color
             vec2 uv = i.color.rg;
             float uvHalfW = i.color.b;
@@ -632,7 +648,7 @@ GLSLShader PS
                 discard;
             }
 
-            bool isSilhouette = i.color.a < 0.20;
+            bool isSilhouette = i.color.a > 0.99;
 
             // Compute final color for crease geometry
             if (isSilhouette && u_SilhouetteDrawMode == SILHOUETTE_DRAW_UVS) {
@@ -676,6 +692,11 @@ GLSLShader PS
                 color.rgb = lerp(color.rgb, d * color.rgb, 0.1);
             }
         }
+
+        // color.rgb = vec3(i.dist.w * 0.01);
+        // if (i.color.a > EPSILON) {
+        //     color.rgb = vec3(i.dist.w, 0, 0);
+        // }
     }
 }
 

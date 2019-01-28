@@ -5,7 +5,7 @@
 #define _SETTINGS_OGSFH_
 
 // ---------------------------------------------
-// LOD Group
+// LOD Settings
 // ---------------------------------------------
 
 uniform float u_LOD1Distance
@@ -20,8 +20,10 @@ uniform float u_LOD2Distance
 	string UIName = "LOD2 Distance";
 > = 20.0;
 
+// TODO: Disable silhouette on LOD2?
+
 // ---------------------------------------------
-// Color Group
+// Color Settings
 // ---------------------------------------------
 uniform vec3 u_Diffuse : DIFFUSE
 <
@@ -30,14 +32,17 @@ uniform vec3 u_Diffuse : DIFFUSE
     string UIWidget = "Color";
 > = {1, 0, 0};
 
-uniform vec3 u_ShadowInfluence
+// TODO: Technically the ambient color, but it isn't
+// multiplied with diffuse. I might also want a different
+// input setup for ambient color as another factor.
+uniform vec3 u_Shaded : COLOR
 <
     string UIName = "Shaded";
     string UIGroup = "Color";
     string UIWidget = "Color";
 > = {0.4, 0.4, 0.4};
 
-uniform vec3 u_SpecularColor
+uniform vec3 u_Specular : SPECULAR
 <
 	string UIName = "Specular";
 	string UIGroup = "Color";
@@ -51,7 +56,7 @@ uniform float u_Glossiness
 > = 32.0;
 
 // ---------------------------------------------
-// Silhouette/Crease Group
+// Outline (Silhouettes/Creases) Settings
 // ---------------------------------------------
 uniform vec3 u_OutlineColor
 <
@@ -72,7 +77,7 @@ uniform float u_CreaseScale
     string UIGroup = "Outline";
 > = 0.2;
 
-uniform bool u_CreaseViewSpaceScale
+uniform bool u_OutlineViewSpaceScale
 <
 	string UIName = "Uniform View Space Scale";
 	string UIGroup = "Outline";
@@ -84,14 +89,26 @@ uniform bool u_CullBackfaceCreases
 	string UIGroup = "Outline";
 > = true;
 
+uniform float u_OutlineOffset
+<
+	string UIName = "Uniform Z-depth Offset";
+	string UIGroup ="Outline";
+> = 0;
+
 // ---------------------------------------------
-// Debug Group
+// Debug Settings
 // ---------------------------------------------
 // uniform bool u_Debug
 // <
 //     string UIName = "Debug Mode";
 //     string UIGroup = "Debug";
 // > = false;
+
+uniform float u_SurfaceInsetScale
+<
+	string UIName = "Inset Scale";
+	string UIGroup = "Debug";
+> = 0;
 
 #define GEOMETRY_DRAW_COLOR 1
 #define GEOMETRY_DRAW_WIREFRAME 2
@@ -113,7 +130,7 @@ uniform int u_SilhouetteDrawMode
 	string UIGroup = "Debug";
 	string UIFieldNames = "None:Color:UVs";
 	float UIMin = 0;
-	float UIMax = 3;
+	float UIMax = 2;
 	float UIStep = 1;
 > = 1;
 
@@ -131,7 +148,7 @@ uniform int u_CreaseDrawMode
 > = 1;
 
 // ---------------------------------------------
-// Light 0 Group
+// Light 0 Settings
 // ---------------------------------------------
 uniform bool light0Enable : LIGHTENABLE
 <

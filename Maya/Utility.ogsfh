@@ -11,6 +11,9 @@ uniform mat4 u_NormalMatrix : WorldInverseTranspose;
 uniform mat4 u_CameraMatrix : ViewInverse;
 uniform mat4 u_ViewProjMatrix : ViewProjection < string UIWidget = "None"; >;
 
+#define EPSILON 0.000001
+#define PI 3.14
+
 #define CAMERA_POSITION u_CameraMatrix[3]
 
 // Maya light constants
