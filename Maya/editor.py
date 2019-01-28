@@ -1,5 +1,6 @@
 
 import maya.cmds as cmds
+import math
 
 CREASE_COLORSET = "crease"
 
@@ -55,23 +56,52 @@ def selectCreases(alpha=None):
     cmds.select(getParent(selected[0]))
     cmds.select(cmds.polyListComponentConversion(tv=True))
 
-    lowerBound = 0.0001
-    upperBound = 1.1
+    lowerBound = 0.10 # LOD0
+    upperBound = 0.39 # LOD2 upper
 
     if alpha:
-        lowerBound = alpha - 0.1
-        upperBound = alpha + 0.1
+        lowerBound = alpha
+        upperBound = alpha + 0.9
 
-    # TODO: FASTER!
     vertices = cmds.ls(selection=True, flatten=True)
     alphas = cmds.polyColorPerVertex(query=True, a=True)
 
+    # TODO: faster?
     subset = []
     for i in range(0, len(alphas)):
-        if alphas[i] > lowerBound and alphas[i] < upperBound:
+        if alphas[i] >= lowerBound and alphas[i] <= upperBound:
             subset.append(vertices[i])
     
     cmds.select(subset)
+
+def bumpCrease():
+    """Update creased vertices in a way s.t. they cannot connect
+        directly to another bumped vertex.
+    """
+    selected = cmds.ls(selection=True)
+    if len(selected) < 1:
+        return
+    
+    # Make sure we're working on vertices
+    cmds.select(cmds.polyListComponentConversion(tv=True))
+    vertices = cmds.ls(selection=True, flatten=True)
+    alphas = cmds.polyColorPerVertex(query=True, a=True)
+
+    # Currently we just shift each vertex in the list by
+    # 0.01 through 0.09. Should work for most cases, but 
+    # a smarter solution would be to ensure that nothing in
+    # the list is adjacent to something with the same #
+    # prev = 0
+    # for i in range(0, len(alphas)):
+    #     prev = prev % 9 + 1
+    #     cmds.polyColorPerVertex(a=alphas[0] + prev * 0.01)
+
+    # Actually - might be easier to just give all a static
+    # offset. Because 2 verts with an offset will never
+    # connect (can only be connected to a 0.X0 vertex)
+    for i in range(0, len(alphas)):
+        a = math.floor(alphas[0] * 10) / 10 + 0.01
+        cmds.polyColorPerVertex(a=a)
 
 
 def softenModel():
@@ -101,18 +131,18 @@ def addCreaseGroup(window):
     cmds.rowLayout(numberOfColumns=4)
 
     cmds.button(label="Clear Selected", command="crease(0.0)")
-    cmds.button(label="Crease (LOD0)", command="crease(0.25)")
-    cmds.button(label="Crease (LOD1)", command="crease(0.75)")
-    cmds.button(label="Crease (LOD2)", command="crease(1.0)")
+    cmds.button(label="Crease (LOD0)", command="crease(0.10)")
+    cmds.button(label="Crease (LOD1)", command="crease(0.20)")
+    cmds.button(label="Crease (LOD2)", command="crease(0.30)")
 
     cmds.setParent("..")
 
     cmds.rowLayout(numberOfColumns=4)
 
     cmds.button(label="Select All", command="selectCreases()")
-    cmds.button(label="Select LOD0", command="selectCreases(0.25)")
-    cmds.button(label="Select LOD1", command="selectCreases(0.75)")
-    cmds.button(label="Select LOD2", command="selectCreases(1.0)")
+    cmds.button(label="Select LOD0", command="selectCreases(0.10)")
+    cmds.button(label="Select LOD1", command="selectCreases(0.20)")
+    cmds.button(label="Select LOD2", command="selectCreases(0.30)")
 
     cmds.setParent("..")
 
@@ -125,6 +155,8 @@ def addMiscGroup(window):
 
     cmds.button(label="Soften all edges", command="softenModel()")
     cmds.button(label="Delete History", command="cmds.DeleteHistory()")
+
+    cmds.button(label="Bump Crease", command="bumpCrease()")
 
     cmds.setParent("..")
     cmds.setParent("..")
