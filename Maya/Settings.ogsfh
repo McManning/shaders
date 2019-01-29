@@ -55,6 +55,14 @@ uniform float u_Glossiness
 	string UIGroup = "Color";
 > = 32.0;
 
+// If vertex coloring is enabled, u_Shaded/u_Specular/u_Outline
+// are tints on the vertex color.
+uniform bool u_UseVertexColors
+<
+	string UIName = "Use Vertex Colors";
+	string UIGroup = "Color";
+> = false;
+
 // ---------------------------------------------
 // Outline (Silhouettes/Creases) Settings
 // ---------------------------------------------
