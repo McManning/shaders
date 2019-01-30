@@ -613,111 +613,127 @@ GLSLShader GS
 
 GLSLShader PS
 {
-    float distanceToSegment(vec2 point, vec2 a, vec2 b) {
-        float dist = length(a - b);
-        vec2 v = normalize(b - a);
-        float t = dot(v, point - a);
+    struct EdgeInfo {
+        // Distance between the fragment and the edge's line segment
+        float segmentDistance;
 
-        // Determine which is the closest point to measure
-        // distance from - either an endpoint or an interpolation
-        // somewhere in the middle
-        vec2 spinePoint;
-        if (t > dist) {
-            spinePoint = b;
-        } else if (t > 0.0) {
-            spinePoint = a + t * v;
+        // Half of the screen space width of the edge
+        float halfWidth;
+
+        // If false, this edge is a crease. 
+        bool silhouette;
+    };
+
+    /**
+     * If the fragment is part of edge geometry, extract useful info for rendering
+     */
+    EdgeInfo getEdgeInfo() {
+        EdgeInfo o;
+        
+        // Extract UV coordinates and edge half width
+        vec2 uv = i.uv.xy;
+        float uvHalfW = i.uv.z;
+        uv.y *= uvHalfW * 2;
+
+        // Generate a screen-space capsule by discarding fragments
+        // that are further than uvHalfW from the crease edge
+        vec2 start = vec2(uvHalfW, uvHalfW);
+        vec2 end = vec2(1.0 - uvHalfW, uvHalfW);
+
+        o.halfWidth = uvHalfW;
+        o.segmentDistance = distanceToSegment(uv, start, end); 
+        o.silhouette = i.color.a > 0.99;
+        return o;
+    }
+
+    vec3 edgeLODToColor(float lod) {
+        if (i.color.a >= 0.299) { // LOD2
+            return vec3(0.01);
+        } else if (i.color.a >= 0.199) { // LOD1
+            return vec3(0.25);
+        } else { // LOD0
+            return vec3(1);
+        }
+    }
+
+    /**
+     * Determine final color of edge geometry, taking in account draw mode and edge type.
+     */
+    vec3 getEdgeColor(EdgeInfo info) {
+        vec3 color;
+
+        if (info.silhouette) {
+            if (u_SilhouetteDrawMode == SILHOUETTE_DRAW_UVS) {
+                color = vec3(i.uv.x, 0, i.uv.y);
+            } else if (u_SilhouetteDrawMode == SILHOUETTE_DRAW_COLOR) {
+                color = u_OutlineColor;
+                
+                if (u_UseVertexColors) {
+                    color *= i.color.rgb;
+                }
+            }
         } else {
-            spinePoint = a;
+            if (u_CreaseDrawMode == CREASE_DRAW_UVS) {
+                color = vec3(i.uv.x, 0, i.uv.y);
+            } else if (u_CreaseDrawMode == CREASE_DRAW_LOD) {
+                color = edgeLODToColor(i.color.a);
+            } else if (u_CreaseDrawMode == CREASE_DRAW_COLOR) {
+                color = u_OutlineColor;
+
+                if (u_UseVertexColors) {
+                    color *= i.color.rgb;
+                }
+            }
         }
 
-        return length(point - spinePoint);
+        return color;
+    }
+
+    /**
+     * Determine final color of the original input geometry
+     */
+    vec3 getGeometryColor() {
+        vec3 color = u_Diffuse;
+
+        if (u_UseVertexColors) {
+            color = i.color.rgb;
+        }
+
+        // Wireframe rendering by lerping between a wireframe 
+        // color and our actual output color based on how close the
+        // fragment is to a triangle edge
+        if (u_GeometryDrawMode == GEOMETRY_DRAW_WIREFRAME) {
+            float d = min(i.dist.x, min(i.dist.y, i.dist.z)) * 1.0;
+            // float intensity = exp2(-2.0 * d * d);
+
+            // width should probably be some factor of distance, but whatever.
+            d = smoothstep(0.025, 0.05, d);
+
+            // draw the main color, but fade vertex edges on top of it
+            // TODO: Distance based
+            color = lerp(color, d * color, 0.1);
+        }
+
+        return color;
     }
 
     void main() {
         float d;
 
-        // If alpha channel is nonzero, we're flagged as crease/silhouette geometry
+        // If alpha channel is nonzero, we're flagged as edge geometry
         if (i.color.a >= 0.01) {
-            // Extract UV coordinates and edge half width from color
-            vec2 uv = i.uv.xy;
-            float uvHalfW = i.uv.z;
-            uv.y *= uvHalfW * 2;
+            EdgeInfo info = getEdgeInfo();
 
-            // Generate a screen-space capsule by discarding fragments
-            // that are further than uvHalfW from the crease edge
-            vec2 start = vec2(uvHalfW, uvHalfW);
-            vec2 end = vec2(1.0 - uvHalfW, uvHalfW);
-
-            d = distanceToSegment(uv, start, end);
-            if (d > uvHalfW) {
+            // Generate a screen space capsule by discarding fragments
+            // that are too far from the edge's line segment
+            if (info.segmentDistance > info.halfWidth) {
                 discard;
             }
 
-            bool isSilhouette = i.color.a > 0.99;
-
-            if (isSilhouette) {
-                if (u_SilhouetteDrawMode == SILHOUETTE_DRAW_UVS) {
-                    color.rgb = vec3(uv.x, 0, uv.y);
-                }
-
-                if (u_SilhouetteDrawMode == SILHOUETTE_DRAW_COLOR) {
-                    color.rgb = u_OutlineColor;
-                    
-                    if (u_UseVertexColors) {
-                        color.rgb *= i.color.rgb;
-                    }
-                }
-            } else {
-                if (u_CreaseDrawMode == CREASE_DRAW_UVS) {
-                    color.rgb = vec3(uv.x, 0, uv.y);
-                }
-
-                if (u_CreaseDrawMode == CREASE_DRAW_LOD) {
-                    if (i.color.a >= 0.299) { // LOD2
-                        color.rgb = vec3(0.01);
-                    } else if (i.color.a >= 0.199) { // LOD1
-                        color.rgb = vec3(0.25);
-                    } else { // LOD0
-                        color.rgb = vec3(1);
-                    }
-                }
-
-                if (u_CreaseDrawMode == CREASE_DRAW_COLOR) {
-                    color.rgb = u_OutlineColor;
-
-                    if (u_UseVertexColors) {
-                        color.rgb *= i.color.rgb;
-                    }
-                }
-            }
-
+            color.rgb = getEdgeColor(info);
         } else {
-            color.rgb = u_Diffuse;
-            
-            if (u_UseVertexColors) {
-                color.rgb = i.color.rgb;
-            }
-
-            // Wireframe rendering by lerping between a wireframe 
-            // color and our actual output color based on how close the
-            // fragment is to a triangle edge
-            if (u_GeometryDrawMode == GEOMETRY_DRAW_WIREFRAME) {
-                d = min(i.dist.x, min(i.dist.y, i.dist.z)) * 1.0;
-                float intensity = exp2(-2.0 * d * d);
-
-                // width should probably be some factor of distance, but whatever.
-                d = smoothstep(0.025, 0.05, d);
-
-                // draw the main color, but fade vertex edges on top of it
-                // TODO: Distance based
-                color.rgb = lerp(color.rgb, d * color.rgb, 0.1);
-            }
+            color.rgb = getGeometryColor();
         }
-
-        // color.rgb = vec3(i.dist.w * 0.01);
-        // if (i.color.a > EPSILON) {
-        //     color.rgb = vec3(i.dist.w, 0, 0);
-        // }
     }
 }
 
@@ -732,6 +748,6 @@ technique Main
 	{
 		VertexShader (in appdata, out vs_to_gs o) = VS;
 		GeometryShader (in vs_to_gs gsin, out gs_to_ps o) = GS;
-		PixelShader (in gs_to_ps i, out ps_out) = PS;
+		PixelShader (in gs_to_ps i, out ps_out) = { Utility, PS };
 	}
 }

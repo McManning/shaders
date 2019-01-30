@@ -2,7 +2,7 @@
  * Common globals and functions
  */
 
-// Transformation matrices (named to Unity equivalents)
+// Transformation matrices
 uniform mat4 u_MVPMatrix : WorldViewProjection;
 uniform mat4 u_ProjMatrix : Projection;
 uniform mat4 u_ModelMatrix : World;
@@ -15,14 +15,6 @@ uniform mat4 u_ViewProjMatrix : ViewProjection < string UIWidget = "None"; >;
 #define PI 3.14
 
 #define CAMERA_POSITION u_CameraMatrix[3]
-
-// Maya light constants
-#define LIGHT_TYPE_NONE 0
-#define LIGHT_TYPE_DEFAULT 1
-#define LIGHT_TYPE_SPOT 2
-#define LIGHT_TYPE_POINT 3
-#define LIGHT_TYPE_DIRECTIONAL 4
-#define LIGHT_TYPE_AMBIENT 5
 
 /**
  * Common functions group
@@ -44,5 +36,25 @@ GLSLShader Utility
         color += texture2D(image, uv + (off2 / resolution)) * 0.0702702703;
         color += texture2D(image, uv - (off2 / resolution)) * 0.0702702703;
         return color;
+    }
+    
+    float distanceToSegment(vec2 point, vec2 a, vec2 b) {
+        float dist = length(a - b);
+        vec2 v = normalize(b - a);
+        float t = dot(v, point - a);
+
+        // Determine which is the closest point to measure
+        // distance from - either an endpoint or an interpolation
+        // somewhere in the middle
+        vec2 segmentPoint;
+        if (t > dist) {
+            segmentPoint = b;
+        } else if (t > 0.0) {
+            segmentPoint = a + t * v;
+        } else {
+            segmentPoint = a;
+        }
+
+        return length(point - segmentPoint);
     }
 }

@@ -155,6 +155,22 @@ uniform int u_CreaseDrawMode
 	float UIStep = 1;
 > = 1;
 
+// Which part of the lighting equation should we display for debug.
+// Each contribution will typically blend white (lit) to black (unlit)
+#define ISOLATE_LIGHT_COMBINED 1
+#define ISOLATE_LIGHT_INTENSITY 2
+#define ISOLATE_LIGHT_SHADOWS 3
+#define ISOLATE_LIGHT_DECAY 4
+uniform int u_IsolateLightContribution
+<
+    string UIName = "Isolate Light Contrib";
+    string UIGroup = "Debug";
+    string UIFieldNames="None:Combined:Intensity:Shadows:Decay";
+    float UIMin = 0;
+    float UIMax = 3;
+    float UIStep = 1;
+> = 0;
+
 // ---------------------------------------------
 // Light 0 Settings
 // ---------------------------------------------
@@ -165,6 +181,12 @@ uniform bool light0Enable : LIGHTENABLE
 	int UIOrder = 20;
 > = false;
 
+#define LIGHT_TYPE_NONE 0
+#define LIGHT_TYPE_DEFAULT 1
+#define LIGHT_TYPE_SPOT 2
+#define LIGHT_TYPE_POINT 3
+#define LIGHT_TYPE_DIRECTIONAL 4
+#define LIGHT_TYPE_AMBIENT 5
 uniform int light0Type : LIGHTTYPE
 <
 	string Object = "Light 0";
