@@ -798,12 +798,6 @@ GLSLShader PS
 
         vec3 lightVec = lightPos - worldPos.xyz;
         vec3 L = normalize(lightVec);
-
-        // Standard Lambert diffuse
-        // vec3 diffuse = dot(worldNormal, L) * u_SolidColor;
-        // diffuse *= (lightColor * lightIntensity);
-        // result += diffuse;
-
         float NdotL = clamp(dot(worldNormal, L), 0, 1);
 
         // Basic light intensity based on fragment normal
@@ -812,21 +806,6 @@ GLSLShader PS
         // Clamp intensity to two tone.
         // TODO: Get a little better AA here.
         intensity = 1 - step(intensity, 0.01); // TODO: parameterize
-
-        // vec3 diffuse = lerp(
-        //     u_ShadedColor,
-        //     u_SolidColor,
-        //     smoothstep(0.0, lightIntensity * 0.05, intensity)
-        // );
-
-        // // Two-tone lighting
-        // if (intensity < u_ShadowThreshold) {
-        //     result += u_ShadedColor;
-        // } else if (intensity >= u_ShadowThreshold + 0.001) {
-        //     result += u_SolidColor;
-        // } else {
-        //     result += vec3(1, 0, 0);
-        // }
 
         // Get a contribution from the shadow map of the light
         float shadow = calculateShadowsContribution(lightViewProj, worldPos, NdotL);
