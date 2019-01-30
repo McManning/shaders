@@ -302,7 +302,7 @@ GLSLShader GS
      * @param vec3 n0 Start vertex's normal in world space
      * @param vec3 n1 End vertex's normal in world space
      */
-    void drawCrease(vec4 v0, vec4 v1, vec3 n0, vec3 n1) {
+    void drawCrease(vec4 v0, vec4 v1, vec3 n0, vec3 n1, float thickness0, float thickness1) {
         vec4 camPos = u_CameraMatrix[3];
         
         float scale0 = u_CreaseScale; 
@@ -322,6 +322,9 @@ GLSLShader GS
         v0.xyz += n0 * scale0 * u_SurfaceInsetScale;
         v1.xyz += n1 * scale1 * u_SurfaceInsetScale;
         
+        scale0 *= thickness0;
+        scale1 *= thickness1;
+
         // Extract aspect ratio from the projection matrix
         // where m00 = 1/(aspect * tan(FOV / 2)) and m11 = 1/tan(FOV / 2)
         float aspect = u_ProjMatrix[0][0] / u_ProjMatrix[1][1];
@@ -468,30 +471,34 @@ GLSLShader GS
     bool isValidCrease(int idx, int nextIdx, int lod) {
         // TODO: less hardcoding.
         float low = 0.10; // LOD0 - 0.1X
-        float high = 0.19;
 
         if (lod == 1) { // LOD1 - 0.2X
             low = 0.20;
-            high = 0.29;
         } else if (lod == 2) { // LOD2 - 0.3X
             low = 0.30;
-            high = 0.39;
         }
+
+        // Alpha digits follow the pattern:
+        // 0.LBTT where:
+        // L - LOD level 
+        // B - "Bump" value (1 or 0) - Only 0's and 0-1 can connect.
+        // TT - Thickness from 0 to 99 (later normalized)
 
         float a = gsin[idx].color.a;
         float b = gsin[nextIdx].color.a;
 
-        // Get lower end of the vertex LOD (0.10, 0.20, 0.30)
-        float al = floor(a * 10) / 10;
-        float bl = floor(b * 10) / 10;
+        int aLOD = int(floor(a * 10));
+        int bLOD = int(floor(b * 10));
+
+        int aBump = int(floor(a * 100)) - aLOD * 10;
+        int bBump = int(floor(b * 100)) - bLOD * 10;
         
         // Increasing vertex IDs, both at *least* the 
         // input LOD, *and* one of them is an exact 
         // crease vertex (0.X0)
         return (gsin[idx].id < gsin[nextIdx].id) &&
-            (a >= low && b >= low) &&
-            (abs(a - al) < EPSILON ||
-            abs(b - bl) < EPSILON);
+            (aLOD >= lod + 1 && bLOD >= lod + 1) &&
+            (aBump == 0 || bBump == 0);
     }
 
     /**
@@ -574,7 +581,9 @@ GLSLShader GS
                     u_ModelMatrix * vec4(s.startPos, 1), 
                     u_ModelMatrix * vec4(s.endPos, 1), 
                     s.startNormal,
-                    s.endNormal
+                    s.endNormal,
+                    1.0,
+                    1.0
                 );
             }
         }
@@ -599,11 +608,20 @@ GLSLShader GS
             o.color = gsin[idx].color;
 
             if (isValidCrease(idx, nextIdx, lod)) {
+
+                // Extract thickness at each end
+                float a = gsin[idx].color.a;
+                float b = gsin[nextIdx].color.a;
+                a = a * 100 - floor(a * 100);
+                b = b * 100 - floor(b * 100);
+
                 drawCrease(
                     gsin[idx].worldPosition, 
                     gsin[nextIdx].worldPosition,
                     gsin[idx].normal, 
-                    gsin[nextIdx].normal
+                    gsin[nextIdx].normal,
+                    a, 
+                    b
                 );
             }
         }

@@ -49,19 +49,21 @@ def crease(alpha=1.0):
 
 def selectCreases(alpha=None):
     """Select all crease geometry in the object with the given alpha, or any non-zero alpha"""
+
+    # TODO: Support subset selection (select matches that are a subset of what we already selected)
     selected = cmds.ls(selection=True)
     if len(selected) < 1:
         return
     
-    cmds.select(getParent(selected[0]))
+    cmds.select(getParent(selected[0]), replace=True)
     cmds.select(cmds.polyListComponentConversion(tv=True))
 
     lowerBound = 0.10 # LOD0
     upperBound = 0.39 # LOD2 upper
 
-    if alpha:
+    if alpha is not None:
         lowerBound = alpha
-        upperBound = alpha + 0.9
+        upperBound = alpha + 0.09
 
     vertices = cmds.ls(selection=True, flatten=True)
     alphas = cmds.polyColorPerVertex(query=True, a=True)
@@ -72,7 +74,24 @@ def selectCreases(alpha=None):
         if alphas[i] >= lowerBound and alphas[i] <= upperBound:
             subset.append(vertices[i])
     
-    cmds.select(subset)
+    cmds.select(subset, replace=True)
+
+def breakAlpha(a):
+    """Break alpha value into LOD, Bump, and Thickness
+
+        Currently uses 4 decimal places for the float, 
+        which should be.. safe..ish..
+    """
+    lod = math.floor(a * 10)
+    bump = math.floor(a * 100) - lod * 10
+    thickness = math.floor(a * 10000) - lod * 1000 - bump * 100
+    return (lod, bump, thickness)
+
+def makeAlpha(lod, bump, thickness):
+    """Make an alpha value from LOD/bump/thickness"""
+    # The extra 0.00001 is just to try to hammer out potential
+    # rounding errors at the lowest defined decimal. It's unused.
+    return (lod * 1000 + bump * 100 + thickness) * 0.0001 + 0.00001
 
 def bumpCrease():
     """Update creased vertices in a way s.t. they cannot connect
@@ -87,21 +106,70 @@ def bumpCrease():
     vertices = cmds.ls(selection=True, flatten=True)
     alphas = cmds.polyColorPerVertex(query=True, a=True)
 
-    # Currently we just shift each vertex in the list by
-    # 0.01 through 0.09. Should work for most cases, but 
-    # a smarter solution would be to ensure that nothing in
-    # the list is adjacent to something with the same #
-    # prev = 0
-    # for i in range(0, len(alphas)):
-    #     prev = prev % 9 + 1
-    #     cmds.polyColorPerVertex(a=alphas[0] + prev * 0.01)
-
     # Actually - might be easier to just give all a static
     # offset. Because 2 verts with an offset will never
     # connect (can only be connected to a 0.X0 vertex)
+    # a = math.floor(alphas[0] * 10) / 10 + 0.01
+    # cmds.polyColorPerVertex(a=a)
+    
+    # Have to loop instead of polyColorPerVertex all at once
+    # because we need to maintain LOD/thickness parts.
     for i in range(0, len(alphas)):
-        a = math.floor(alphas[0] * 10) / 10 + 0.01
-        cmds.polyColorPerVertex(a=a)
+        lod, bump, thickness = breakAlpha(alphas[i])
+        cmds.select(vertices[i], replace=True)
+        cmds.polyColorPerVertex(a=makeAlpha(lod, 1, thickness))
+
+    # Restore selection
+    cmds.select(selected, replace=True)
+
+def sharpenCrease(slider):
+    """Sharpen (reduce width) of selected creased vertices.
+        First vertex will be given a small width, and progress
+        until the last vertex in the selection
+    """
+    min_thickness = cmds.floatSliderGrp(slider, query=True, value=True)
+    min_thickness = max(0, min(min_thickness * 100, 99))
+
+    selected = cmds.ls(orderedSelection=True, flatten=True)
+    if len(selected) < 1:
+        return
+
+    # Ensure selection is a vertex list
+    # cmds.select(cmds.polyListComponentConversion(tv=True))
+    
+    alphas = cmds.polyColorPerVertex(query=True, a=True)
+    lod, bump, thickness = breakAlpha(alphas.pop())
+
+    # If minimum is greater than maximum, then all vertices will
+    # gain the same thickness 
+    max_thickness = max(thickness, min_thickness)
+
+    # Set the last vert in the list to maximum 
+    print(selected[-1])
+    print(max_thickness)
+
+    cmds.select(selected[-1], replace=True)
+    cmds.polyColorPerVertex(a=makeAlpha(lod, bump, max_thickness))
+    
+    # Set every other vert in the list to increment to the local maximum 
+    flen = len(alphas) * 1.0
+    for i in range(0, len(alphas)):
+        lod, bump, thickness = breakAlpha(alphas[i])
+        thickness = min_thickness + (i / flen) * (max_thickness - min_thickness)
+
+        print(selected[i])
+        print(thickness)
+
+        cmds.select(selected[i], replace=True)
+        cmds.polyColorPerVertex(a=makeAlpha(lod, bump, thickness))
+
+    # Restore selection
+    cmds.select(selected, replace=True)
+    selected = cmds.ls(orderedSelection=True, flatten=True)
+    print('-----')
+    print(selected)
+    alphas = cmds.polyColorPerVertex(query=True, a=True)
+    print(alphas)
 
 
 def softenModel():
@@ -109,11 +177,11 @@ def softenModel():
     # select all edges of the parent, soften, and return to old selection
     selected = cmds.ls(selection=True)
 
-    cmds.select(getParent(selected[0]))
+    cmds.select(getParent(selected[0]), replace=True)
     cmds.select(cmds.polyListComponentConversion(te=True))
     cmds.polySoftEdge(a=180)
 
-    cmds.select(selected)
+    cmds.select(selected, replace=True)
 
 def addMenuBar(window):
     """Add dropdown menu bar"""
@@ -129,20 +197,30 @@ def addCreaseGroup(window):
     cmds.text(label="Words here")
 
     cmds.rowLayout(numberOfColumns=4)
-
     cmds.button(label="Clear Selected", command="crease(0.0)")
-    cmds.button(label="Crease (LOD0)", command="crease(0.10)")
-    cmds.button(label="Crease (LOD1)", command="crease(0.20)")
-    cmds.button(label="Crease (LOD2)", command="crease(0.30)")
-
+    cmds.button(label="Crease (LOD0)", command="crease(0.10991)")
+    cmds.button(label="Crease (LOD1)", command="crease(0.20991)")
+    cmds.button(label="Crease (LOD2)", command="crease(0.30991)")
     cmds.setParent("..")
 
     cmds.rowLayout(numberOfColumns=4)
-
     cmds.button(label="Select All", command="selectCreases()")
     cmds.button(label="Select LOD0", command="selectCreases(0.10)")
     cmds.button(label="Select LOD1", command="selectCreases(0.20)")
     cmds.button(label="Select LOD2", command="selectCreases(0.30)")
+    cmds.setParent("..")
+
+    cmds.columnLayout(rowSpacing=5)
+    slider = cmds.floatSliderGrp(
+        label="Sharpen", 
+        field=True, 
+        minValue=0.0, 
+        maxValue=1.0, 
+        fieldMinValue=0.0, 
+        fieldMaxValue=1.0, 
+        value=0
+    )
+    cmds.button(label="Sharpen", command="sharpenCrease(\"" + slider + "\")")
 
     cmds.setParent("..")
 
@@ -157,7 +235,6 @@ def addMiscGroup(window):
     cmds.button(label="Delete History", command="cmds.DeleteHistory()")
 
     cmds.button(label="Bump Crease", command="bumpCrease()")
-
     cmds.setParent("..")
     cmds.setParent("..")
 
