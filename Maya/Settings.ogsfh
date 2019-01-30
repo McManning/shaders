@@ -112,6 +112,7 @@ uniform float u_OutlineOffset
 //     string UIGroup = "Debug";
 // > = false;
 
+// TODO: Move this. Is actually being used for calculations now
 uniform float u_SurfaceInsetScale
 <
 	string UIName = "Inset Scale";

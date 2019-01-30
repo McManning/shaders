@@ -7,7 +7,7 @@ attribute appdata {
     vec3 position       : POSITION;
 	vec3 normal         : NORMAL;
     vec4 color          : COLOR0;
-    vec3 uv             : TEXCOORD0;
+    vec2 uv             : TEXCOORD0;
 };
  
 attribute vs_to_gs {
@@ -45,7 +45,7 @@ GLSLShader VS
         o.worldPosition = u_ModelMatrix * vec4(position, 1);
         o.normal = normal; // (u_ModelMatrix * vec4(normal, 0)).xyz;
         o.color = color; // color.aaaa; // temp swizzle of alpha in every color bit for debug
-        o.uv = uv;
+        o.uv = vec3(uv, 0);
         o.id = gl_VertexID; // Used for crease detection
 
         vec4 camPos = u_CameraMatrix[3]; 
@@ -520,7 +520,7 @@ GLSLShader GS
             
             // Calculate opposite edge distance per vertex for wireframing
             o.dist = vec4(getOppositeEdgeDistanceVec(idx), gl_Position.z);
-            // throwing z as a rider to test render :^)
+            // TODO: throwing z as a rider to test render :^)
             EmitVertex();
         }
 
@@ -690,13 +690,212 @@ GLSLShader PS
     }
 
     /**
+     * @return 1 for fully in shadow, 0 for no contribution, anything in between for AA
+     */
+    float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos, float NdotL) 
+    {
+        vec4 viewPos = lightViewProj * worldPos;
+
+        // Correct for perspective
+        vec3 perspViewPos = viewPos.xyz / viewPos.w;
+
+        // No contribution if we're outside the light's view 
+        if (perspViewPos.x < -1 || 
+            perspViewPos.x > 1 || 
+            perspViewPos.y < -1 || 
+            perspViewPos.y > 1 || 
+            perspViewPos.z < -1 || 
+            perspViewPos.z > 1
+        ) {
+            return 0;
+        }
+
+        // Transform texture sample location from [-1, 1] to [0, 1] in UV coordinates
+        vec2 uv = perspViewPos.xy * 0.5 + 0.5;
+
+        // Position's depth from the light view
+        float depth = perspViewPos.z; // - (0.01 / viewPos.w);
+
+        // Sample depth map from light0 view and don't contribute if 
+        // our depth is further from the light than sampled depth
+        // Note that Maya only has depth information in the x
+        // vec4 sampled = textureLod(light0ShadowMapSampler, uv, 0);
+
+        // tan(acos(NdotL)) is used to modify our bias based on the 
+        // slope for curved surfaces that end up artifacting
+        // Source: http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/
+        float bias = 0.005 * tan(acos(NdotL));
+        bias = clamp(bias, 0.0, 0.01) * 0.01;
+        
+        vec4 sampled = blur9(light0ShadowMapSampler, uv, vec2(512.0, 512.0) * 5.0, perspViewPos.xy * 5);
+    
+        // Not occluded, no shadow contribution.
+        if (depth - sampled.x < bias) {
+            return 0;
+        }
+        
+        // Occluded, full shadow
+        return 1;
+
+        // An attempt at slight anti-aliasing of the edges.
+        // It's pretty piss poor, but this is a good
+        // spot for a TODO to replace with a better algorithm.
+
+        // Random offsets for poisson sampling of UV coordinates around our texel
+        // Samples come from: https://www.geeks3d.com/20100628/3d-programming-ready-to-use-64-sample-poisson-disc/
+        vec2 poissonDisk[16] = vec2[](
+            vec2(-0.667531, 0.326090),
+            vec2(-0.098422, -0.295755),
+            vec2(-0.885922, 0.215369),
+            vec2(0.566637, 0.605213),
+            vec2(0.039766, -0.396100),
+            vec2(0.751946, 0.453352),
+            vec2(0.078707, -0.715323),
+            vec2(-0.075838, -0.529344),
+            vec2(0.724479, -0.580798),
+            vec2(0.222999, -0.215125),
+            vec2(-0.467574, -0.405438),
+            vec2(-0.248268, -0.814753),
+            vec2(0.354411, -0.887570),
+            vec2(0.175817, 0.382366),
+            vec2(0.487472, -0.063082),
+            vec2(-0.084078, 0.898312)
+        );
+
+        float sum = 1;
+        // Poisson sampling of adjacent texels to get some mild AA going on.
+        // Numbers are trial and error and probably won't work for everything :^)
+        for (int i = 0; i < 8; i++) {
+            if (depth - textureLod(light0ShadowMapSampler, uv + poissonDisk[i]/1000.0, 0).x < bias) {
+                sum -= 0.125; // 1/8
+            }
+        }
+
+        return sum;
+    }
+
+    float calculateLightContribution(
+        // Light arguments
+        bool lightEnable, 
+        int lightType, 
+        vec3 lightPos, 
+        vec3 lightDir, 
+        vec3 lightColor,
+        float lightIntensity, 
+        float lightConeAngle,
+        float lightFalloff,
+        mat4 lightViewProj,
+        // Fragment arguments
+        vec4 worldPos,
+        vec3 worldNormal,
+        vec3 eyeDir
+    ) {
+        if (!lightEnable) {
+            return 0;
+        }
+
+        // If ambient light - do a color mix and no additional
+        // shadow mapping or whatever. (use light color + intensity for mix)
+
+        vec3 lightVec = lightPos - worldPos.xyz;
+        vec3 L = normalize(lightVec);
+
+        // Standard Lambert diffuse
+        // vec3 diffuse = dot(worldNormal, L) * u_SolidColor;
+        // diffuse *= (lightColor * lightIntensity);
+        // result += diffuse;
+
+        float NdotL = clamp(dot(worldNormal, L), 0, 1);
+
+        // Basic light intensity based on fragment normal
+        float intensity = max(0, NdotL * lightIntensity);
+
+        // Clamp intensity to two tone.
+        // TODO: Get a little better AA here.
+        intensity = 1 - step(intensity, 0.01); // TODO: parameterize
+
+        // vec3 diffuse = lerp(
+        //     u_ShadedColor,
+        //     u_SolidColor,
+        //     smoothstep(0.0, lightIntensity * 0.05, intensity)
+        // );
+
+        // // Two-tone lighting
+        // if (intensity < u_ShadowThreshold) {
+        //     result += u_ShadedColor;
+        // } else if (intensity >= u_ShadowThreshold + 0.001) {
+        //     result += u_SolidColor;
+        // } else {
+        //     result += vec3(1, 0, 0);
+        // }
+
+        // Get a contribution from the shadow map of the light
+        float shadow = calculateShadowsContribution(lightViewProj, worldPos, NdotL);
+
+        float decay = 1.0;
+
+        // If we're a spotlight, decay around the cone
+        if (lightType == LIGHT_TYPE_SPOT) {
+            float LdotDir = dot(normalize(lightVec), -lightDir);
+            // coneDecay = pow(clamp(LdotDir, 0.0, 1.0), 1 / lightConeAngle);
+            decay = smoothstep(cos(lightFalloff), cos(lightConeAngle), LdotDir);
+        }
+
+        // float v = clamp(intensity / lightIntensity, 0.01, 0.99);
+        // vec3 samp = texture2D(u_ShadowMapSampler, vec2(0, v)).xyz;
+
+        if (u_IsolateLightContribution == ISOLATE_LIGHT_INTENSITY) {
+            return intensity;
+        }
+
+        if (u_IsolateLightContribution == ISOLATE_LIGHT_SHADOWS) {
+            return shadow;
+        }
+
+        if (u_IsolateLightContribution == ISOLATE_LIGHT_DECAY) {
+            return decay;
+        }
+
+        // Default: mix 
+        return clamp(intensity * decay * (1 - shadow), 0.0, 1.0);
+    }
+
+    /**
      * Determine final color of the original input geometry
      */
     vec3 getGeometryColor() {
-        vec3 color = u_Diffuse;
+        vec3 color;
 
-        if (u_UseVertexColors) {
-            color = i.color.rgb;
+        // Calculate lighting
+        vec3 eyeDir = normalize(u_CameraMatrix[3].xyz - i.worldPosition.xyz);
+
+        float light = calculateLightContribution(
+            light0Enable, 
+            light0Type, 
+            light0Pos,
+            light0Dir,
+            light0Color,
+            light0Intensity,
+            light0ConeAngle,
+            light0FallOff,
+            light0ViewProj,
+            i.worldPosition,
+            i.worldNormal,
+            eyeDir
+        );
+        
+        if (u_IsolateLightContribution > 0) {
+            color = vec3(light);
+        } else {
+            if (u_UseVertexColors) {
+                // Use vertex color for diffuse and mix with shaded
+                // color = u_Diffuse * u_Shaded * light;
+                // color = lerp(u_Shaded, u_Diffuse, light);
+                color = i.color.xyz;
+            } else {
+                // Fixed diffuse + shade color palette, lerp between
+                color = lerp(u_Shaded, u_Diffuse, light);
+            }
         }
 
         // Wireframe rendering by lerping between a wireframe 
@@ -737,6 +936,42 @@ GLSLShader PS
     }
 }
 
+attribute svs_to_sps {
+    vec4 worldPosition  : POSITION;
+};
+
+GLSLShader ShadowVS
+{
+    void main()
+    {
+        o.worldPosition = u_ModelMatrix * vec4(position, 1);
+    }
+}
+
+/**
+ * Shadow fragment shader from the perspective of attached light(s)
+ *
+ * Operates solely on the original geometry, as edges don't matter here.
+ */ 
+GLSLShader ShadowPS
+{
+    /**
+     * Via Autodesk's Uber Shader
+     */
+    float getShadowDepth(vec4 worldPos, mat4 shadowProjMatrix) {
+        vec4 mul = shadowProjMatrix * worldPos;
+        float depthPerPixel = mul.z / mul.w;
+        return (depthPerPixel + fwidth(depthPerPixel)) * 0.5 + 0.5;
+    }
+
+    void main() {
+        // Dotted shadow, for verifying we're actually running
+        // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
+        float depth = getShadowDepth(i.worldPosition, u_ViewProjMatrix);
+        color = vec4(depth, depth, depth, 1);
+    }
+}
+
 technique Main
 <
     string Transparency = "Opaque";
@@ -745,9 +980,23 @@ technique Main
 >
 {
 	pass p0
+    <
+        string drawContext = "colorPass";
+    >
 	{
 		VertexShader (in appdata, out vs_to_gs o) = VS;
 		GeometryShader (in vs_to_gs gsin, out gs_to_ps o) = GS;
 		PixelShader (in gs_to_ps i, out ps_out) = { Utility, PS };
 	}
+    
+    // Shadow cast pass. Not working for some reason - probably b/c of missing GS.
+    // Skipping for now since it just mimics Maya's shadow casting anyway.
+    // pass p1
+    // <
+    //     string drawContext = "shadowPass";
+    // >
+    // {
+	// 	VertexShader (in appdata, out svs_to_sps o) = ShadowVS;
+	// 	PixelShader (in svs_to_sps i, out ps_out) = ShadowPS;
+    // }
 }
