@@ -707,7 +707,7 @@ GLSLShader PS
             perspViewPos.z < -1 || 
             perspViewPos.z > 1
         ) {
-            return 0;
+            return 1;
         }
 
         // Transform texture sample location from [-1, 1] to [0, 1] in UV coordinates
@@ -741,37 +741,37 @@ GLSLShader PS
         // It's pretty piss poor, but this is a good
         // spot for a TODO to replace with a better algorithm.
 
-        // Random offsets for poisson sampling of UV coordinates around our texel
-        // Samples come from: https://www.geeks3d.com/20100628/3d-programming-ready-to-use-64-sample-poisson-disc/
-        vec2 poissonDisk[16] = vec2[](
-            vec2(-0.667531, 0.326090),
-            vec2(-0.098422, -0.295755),
-            vec2(-0.885922, 0.215369),
-            vec2(0.566637, 0.605213),
-            vec2(0.039766, -0.396100),
-            vec2(0.751946, 0.453352),
-            vec2(0.078707, -0.715323),
-            vec2(-0.075838, -0.529344),
-            vec2(0.724479, -0.580798),
-            vec2(0.222999, -0.215125),
-            vec2(-0.467574, -0.405438),
-            vec2(-0.248268, -0.814753),
-            vec2(0.354411, -0.887570),
-            vec2(0.175817, 0.382366),
-            vec2(0.487472, -0.063082),
-            vec2(-0.084078, 0.898312)
-        );
+        // // Random offsets for poisson sampling of UV coordinates around our texel
+        // // Samples come from: https://www.geeks3d.com/20100628/3d-programming-ready-to-use-64-sample-poisson-disc/
+        // vec2 poissonDisk[16] = vec2[](
+        //     vec2(-0.667531, 0.326090),
+        //     vec2(-0.098422, -0.295755),
+        //     vec2(-0.885922, 0.215369),
+        //     vec2(0.566637, 0.605213),
+        //     vec2(0.039766, -0.396100),
+        //     vec2(0.751946, 0.453352),
+        //     vec2(0.078707, -0.715323),
+        //     vec2(-0.075838, -0.529344),
+        //     vec2(0.724479, -0.580798),
+        //     vec2(0.222999, -0.215125),
+        //     vec2(-0.467574, -0.405438),
+        //     vec2(-0.248268, -0.814753),
+        //     vec2(0.354411, -0.887570),
+        //     vec2(0.175817, 0.382366),
+        //     vec2(0.487472, -0.063082),
+        //     vec2(-0.084078, 0.898312)
+        // );
 
-        float sum = 1;
-        // Poisson sampling of adjacent texels to get some mild AA going on.
-        // Numbers are trial and error and probably won't work for everything :^)
-        for (int i = 0; i < 8; i++) {
-            if (depth - textureLod(light0ShadowMapSampler, uv + poissonDisk[i]/1000.0, 0).x < bias) {
-                sum -= 0.125; // 1/8
-            }
-        }
+        // float sum = 1;
+        // // Poisson sampling of adjacent texels to get some mild AA going on.
+        // // Numbers are trial and error and probably won't work for everything :^)
+        // for (int i = 0; i < 8; i++) {
+        //     if (depth - textureLod(light0ShadowMapSampler, uv + poissonDisk[i]/1000.0, 0).x < bias) {
+        //         sum -= 0.125; // 1/8
+        //     }
+        // }
 
-        return sum;
+        // return sum;
     }
 
     float calculateLightContribution(
