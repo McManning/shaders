@@ -25,12 +25,27 @@ uniform float u_LOD2Distance
 // ---------------------------------------------
 // Color Settings
 // ---------------------------------------------
+// If vertex coloring is enabled, u_Shaded/u_Specular/u_Outline
+// are multipliers on the the vertex color.
+uniform bool u_UseVertexColors
+<
+	string UIName = "Use Vertex Coloring";
+	string UIGroup = "Color";
+> = false;
+
 uniform vec3 u_Diffuse : DIFFUSE
 <
     string UIName = "Diffuse";
     string UIGroup = "Color";
     string UIWidget = "Color";
 > = {1, 0, 0};
+
+uniform vec3 u_OutlineColor
+<
+    string UIName = "Outline";
+    string UIGroup = "Color";
+    string UIWidget = "Color";
+> = {1, 1, 1};
 
 // TODO: Technically the ambient color, but it isn't
 // multiplied with diffuse. I might also want a different
@@ -55,23 +70,9 @@ uniform float u_Glossiness
 	string UIGroup = "Color";
 > = 32.0;
 
-// If vertex coloring is enabled, u_Shaded/u_Specular/u_Outline
-// are tints on the vertex color.
-uniform bool u_UseVertexColors
-<
-	string UIName = "Use Vertex Colors";
-	string UIGroup = "Color";
-> = false;
-
 // ---------------------------------------------
 // Outline (Silhouettes/Creases) Settings
 // ---------------------------------------------
-uniform vec3 u_OutlineColor
-<
-    string UIName = "Color";
-    string UIGroup = "Outline";
-    string UIWidget = "Color";
-> = {1, 1, 1};
 
 uniform float u_SilhouetteScale
 <
