@@ -692,8 +692,7 @@ GLSLShader PS
     /**
      * @return 1 for fully in shadow, 0 for no contribution, anything in between for AA
      */
-    float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos, float NdotL) 
-    {
+    float calculateShadowsContribution(mat4 lightViewProj, vec4 worldPos, float NdotL) {
         vec4 viewPos = lightViewProj * worldPos;
 
         // Correct for perspective
@@ -884,14 +883,20 @@ GLSLShader PS
             eyeDir
         );
         
+        // Slight AA across light transitions. Not much of an MSAA 
+        // replacement but does improve things a bit. 
+        // Via: https://prideout.net/blog/old/blog/index.html@p=22.html
+        float e = fwidth(light);
+        if (light > 0.5 - e && light < 0.5 + e) {
+            light = smoothstep(0.5 - e, 0.5 + e, light);
+        }
+
         if (u_IsolateLightContribution > 0) {
             color = vec3(light);
         } else {
             if (u_UseVertexColors) {
                 // Use vertex color for diffuse and mix with shaded
-                // color = u_Diffuse * u_Shaded * light;
-                // color = lerp(u_Shaded, u_Diffuse, light);
-                color = i.color.xyz;
+                color = lerp(i.color.xyz * u_Shaded, i.color.xyz, light);
             } else {
                 // Fixed diffuse + shade color palette, lerp between
                 color = lerp(u_Shaded, u_Diffuse, light);
@@ -917,8 +922,6 @@ GLSLShader PS
     }
 
     void main() {
-        float d;
-
         // If alpha channel is nonzero, we're flagged as edge geometry
         if (i.color.a >= 0.01) {
             EdgeInfo info = getEdgeInfo();
