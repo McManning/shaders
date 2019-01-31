@@ -64,12 +64,6 @@ uniform vec3 u_Specular : SPECULAR
 	string UIWidget = "Color";
 > = {0.9, 0.9, 0.9};
 
-uniform float u_Glossiness
-<
-	string UIName = "Glossiness";
-	string UIGroup = "Color";
-> = 32.0;
-
 // ---------------------------------------------
 // Outline (Silhouettes/Creases) Settings
 // ---------------------------------------------
@@ -113,6 +107,24 @@ uniform float u_OutlineOffset
 // ---------------------------------------------
 // General Lighting Settings
 // ---------------------------------------------
+
+uniform float u_SpecularScale
+<
+	string UIName = "Specular Strength";
+	string UIGroup = "Lighting";
+> = 1.0;
+
+uniform float u_Shininess
+<
+	string UIName = "Shininess";
+	string UIGroup = "Lighting";
+> = 32.0;
+
+uniform float u_RimScale
+<
+	string UIName = "Rim Strength";
+	string UIGroup = "Lighting";
+> = 1.0;
 
 uniform bool u_ReceivesShadows
 <
@@ -182,16 +194,18 @@ uniform int u_CreaseDrawMode
 // Which part of the lighting equation should we display for debug.
 // Each contribution will typically blend white (lit) to black (unlit)
 #define ISOLATE_LIGHT_COMBINED 1
-#define ISOLATE_LIGHT_INTENSITY 2
-#define ISOLATE_LIGHT_SHADOWS 3
-#define ISOLATE_LIGHT_DECAY 4
+#define ISOLATE_LIGHT_DIFFUSE 2
+#define ISOLATE_LIGHT_SPECULAR 3
+#define ISOLATE_LIGHT_RIM 4
+#define ISOLATE_LIGHT_SHADOWS 5
+#define ISOLATE_LIGHT_DECAY 6
 uniform int u_IsolateLightContribution
 <
     string UIName = "Isolate Light Contrib";
     string UIGroup = "Debug";
-    string UIFieldNames="None:Combined:Intensity:Shadows:Decay";
+    string UIFieldNames="None:Combined:Diffuse:Specular:Rim:Shadows:Decay";
     float UIMin = 0;
-    float UIMax = 3;
+    float UIMax = 6;
     float UIStep = 1;
 > = 0;
 

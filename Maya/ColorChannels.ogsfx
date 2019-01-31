@@ -133,7 +133,7 @@ GLSLShader PS
         float NdotV = max(dot(normal, halfDir), 0.0);
 
         float specIntensity = pow(NdotV * intensity, u_Glossiness * u_Glossiness);
-        vec3 specular = smoothstep(0.0, 0.0001, specIntensity) * u_SpecularColor;
+        vec3 specular = smoothstep(0.0, 0.0001, specIntensity) * u_Specular;
 
         // More tightening
         specular = smoothstep(0.95, 1.0, specular);
@@ -183,7 +183,7 @@ GLSLShader shadowFrag
         // Dotted shadow, for verifying we're actually running
         // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
 
-        float depth = getShadowDepth(i.worldPosition, u_ShadowViewProj);
+        float depth = getShadowDepth(i.worldPosition, u_ViewProjMatrix);
         color = vec4(depth, depth, depth, 1);
     }
 }
