@@ -78,13 +78,19 @@ uniform float u_SilhouetteScale
 <
     string UIName = "Silhouette Scale";
     string UIGroup = "Outline";
-> = 0.2;
+> = 0.065;
 
 uniform float u_CreaseScale
 <
     string UIName = "Crease Scale";
     string UIGroup = "Outline";
-> = 0.2;
+> = 0.065;
+
+uniform float u_EdgeOpacity
+<
+	string UIName = "Opacity";
+	string UIGroup = "Outline";
+> = 1.0;
 
 uniform bool u_OutlineViewSpaceScale
 <
@@ -102,7 +108,7 @@ uniform float u_OutlineOffset
 <
 	string UIName = "Uniform Z-depth Offset";
 	string UIGroup ="Outline";
-> = 0;
+> = 0.002;
 
 // ---------------------------------------------
 // Debug Settings
