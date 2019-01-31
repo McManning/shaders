@@ -843,7 +843,10 @@ GLSLShader PS
         intensity = 1 - step(intensity, 0.01); // TODO: parameterize
 
         // Get a contribution from the shadow map of the light
-        float shadow = calculateShadowsContribution(lightViewProj, worldPos, NdotL);
+        float shadow = 0;
+        if (u_ReceivesShadows) {
+            shadow = calculateShadowsContribution(lightViewProj, worldPos, NdotL);
+        }
 
         float decay = 1.0;
 
@@ -953,15 +956,15 @@ GLSLShader PS
     }
 }
 
-attribute svs_to_sps {
-    vec4 worldPosition  : POSITION;
+attribute shadowdata {
+    vec4 worldPosition : POSITION;
 };
 
 GLSLShader ShadowVS
 {
-    void main()
-    {
+    void main() {
         o.worldPosition = u_ModelMatrix * vec4(position, 1);
+        gl_Position = u_ViewProjMatrix * o.worldPosition;
     }
 }
 
@@ -982,9 +985,13 @@ GLSLShader ShadowPS
     }
 
     void main() {
+        if (!u_CastsShadows) {
+            discard;
+        }
+        
         // Dotted shadow, for verifying we're actually running
         // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
-        float depth = getShadowDepth(i.worldPosition, u_ViewProjMatrix);
+        float depth = getShadowDepth(psin.worldPosition, u_ViewProjMatrix);
         color = vec4(depth, depth, depth, 1);
     }
 }
@@ -1008,12 +1015,12 @@ technique Main
     
     // Shadow cast pass. Not working for some reason - probably b/c of missing GS.
     // Skipping for now since it just mimics Maya's shadow casting anyway.
-    // pass p1
-    // <
-    //     string drawContext = "shadowPass";
-    // >
-    // {
-	// 	VertexShader (in appdata, out svs_to_sps o) = ShadowVS;
-	// 	PixelShader (in svs_to_sps i, out ps_out) = ShadowPS;
-    // }
+    pass p1
+    <
+        string drawContext = "shadowPass";
+    >
+    {
+		VertexShader (in appdata, out shadowdata o) = ShadowVS;
+		PixelShader (in shadowdata psin, out ps_out) = ShadowPS;
+    }
 }

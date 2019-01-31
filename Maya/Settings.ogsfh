@@ -111,6 +111,22 @@ uniform float u_OutlineOffset
 > = 0.002;
 
 // ---------------------------------------------
+// General Lighting Settings
+// ---------------------------------------------
+
+uniform bool u_ReceivesShadows
+<
+	string UIName = "Receives Shadows";
+	string UIGroup = "Lighting";
+> = true;
+
+uniform bool u_CastsShadows
+<
+	string UIName = "Casts Shadows";
+	string UIGroup = "Lighting";
+> = true;
+
+// ---------------------------------------------
 // Debug Settings
 // ---------------------------------------------
 // uniform bool u_Debug
