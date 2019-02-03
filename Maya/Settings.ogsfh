@@ -31,7 +31,7 @@ uniform bool u_UseVertexColors
 <
 	string UIName = "Use Vertex Coloring";
 	string UIGroup = "Color";
-> = false;
+> = true;
 
 uniform vec3 u_Diffuse : DIFFUSE
 <
@@ -112,7 +112,7 @@ uniform bool u_Unlit
 <
 	string UIName = "Unlit";
 	string UIGroup = "Lighting";
-> = false;
+> = true;
 
 uniform float u_SpecularScale
 <
