@@ -157,6 +157,11 @@ def sharpenCrease(slider):
     # gain the same thickness 
     max_thickness = max(thickness, min_thickness)
 
+    # Edge case: if there's only one vertex selected, set that
+    # vertex to whatever the slider says. 
+    if len(alphas) < 1:
+        max_thickness = min_thickness
+
     # Set the last vert in the list to maximum 
     print(selected[-1])
     print(max_thickness)
