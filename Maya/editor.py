@@ -23,21 +23,14 @@ def getParent(selector):
 
     return selector
 
-def crease(alpha=1.0):
-    """Modify the crease dataseat for the selected vertices"""
+def setColorset():
+    """Make sure the mesh has the right colorset enabled"""
     # Try to switch to the crease colorset. If we can't, make one. 
     try:
         cmds.polyColorSet(currentColorSet=True, colorSet=CREASE_COLORSET)
     except RuntimeError:
         cmds.polyColorSet(create=True, colorSet=CREASE_COLORSET)
         cmds.polyColorSet(currentColorSet=True, colorSet=CREASE_COLORSET)
-
-    # Convert selection to vertices, set alpha channel for each, 
-    # then convert back to the previous selection
-    selected = cmds.ls(selection=True)
-    cmds.select(cmds.polyListComponentConversion(tv=True))
-    cmds.polyColorPerVertex(a=alpha)
-    cmds.select(selected)
 
     """TODO: Also apply the colorset to the shader if not already. E.g.:
 
@@ -46,6 +39,26 @@ def crease(alpha=1.0):
     AEhwShader_varyingParameterUpdate(1,1,0);
     updateRenderOverride;
     """
+
+
+def crease(alpha=1.0):
+    """Modify the crease dataseat for the selected vertices"""
+    setColorset()
+    
+    # Convert selection to vertices, set alpha channel for each, 
+    # then convert back to the previous selection
+    selected = cmds.ls(selection=True)
+    cmds.select(cmds.polyListComponentConversion(tv=True))
+    cmds.polyColorPerVertex(a=alpha)
+    cmds.select(selected)
+
+    # TODO: It seems that clearing a crease will also recalculate
+    # vertex coloring in some way on Maya. Might be because we're
+    # splitting vertices by painting colors on faces, and then the
+    # update to the color at a vertex tries to re-combine on the 
+    # maya side. Maybe a recommended method for splitting colors
+    # is just to forcibly split the model?
+
 
 def selectCreases(alpha=None):
     """Select all crease geometry in the object with the given alpha, or any non-zero alpha"""
@@ -183,6 +196,24 @@ def softenModel():
 
     cmds.select(selected, replace=True)
 
+def resetMesh():
+    """Softens, deletes creases, and sets vertex colors to a sane default"""
+    selected = cmds.ls(selection=True)
+
+    cmds.select(getParent(selected[0]), replace=True)
+    setColorset()
+
+    # Soften all edges
+    cmds.select(cmds.polyListComponentConversion(te=True))
+    cmds.polySoftEdge(a=180)
+
+    # Reset vertex colors of every vertex to white + no crease data
+    cmds.select(cmds.polyListComponentConversion(tv=True))
+    cmds.polyColorPerVertex(r=1, g=1, b=1, a=0)
+
+    # Restore selection
+    cmds.select(selected, replace=True)
+
 def addMenuBar(window):
     """Add dropdown menu bar"""
     cmds.menuBarLayout()
@@ -233,8 +264,9 @@ def addMiscGroup(window):
 
     cmds.button(label="Soften all edges", command="softenModel()")
     cmds.button(label="Delete History", command="cmds.DeleteHistory()")
-
     cmds.button(label="Bump Crease", command="bumpCrease()")
+    cmds.button(label="Reset Mesh", command="resetMesh()")
+
     cmds.setParent("..")
     cmds.setParent("..")
 
