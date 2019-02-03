@@ -935,21 +935,26 @@ GLSLShader PS
         // Calculate lighting
         vec3 eyeDir = normalize(u_CameraMatrix[3].xyz - i.worldPosition.xyz);
 
-        float light = calculateLightContribution(
-            light0Enable, 
-            light0Type, 
-            light0Pos,
-            light0Dir,
-            light0Color,
-            light0Intensity,
-            light0ConeAngle,
-            light0FallOff,
-            light0ViewProj,
-            i.worldPosition,
-            i.worldNormal,
-            eyeDir
-        );
+        float light = 0.5;
         
+        // Determine light/shadow contributions if lit
+        if (!u_Unlit) {
+            light = calculateLightContribution(
+                light0Enable, 
+                light0Type, 
+                light0Pos,
+                light0Dir,
+                light0Color,
+                light0Intensity,
+                light0ConeAngle,
+                light0FallOff,
+                light0ViewProj,
+                i.worldPosition,
+                i.worldNormal,
+                eyeDir
+            );
+        } 
+
         // Slight AA across light transitions. Not much of an MSAA 
         // replacement but does improve things a bit. 
         // Via: https://prideout.net/blog/old/blog/index.html@p=22.html

@@ -108,6 +108,12 @@ uniform float u_OutlineOffset
 // General Lighting Settings
 // ---------------------------------------------
 
+uniform bool u_Unlit
+<
+	string UIName = "Unlit";
+	string UIGroup = "Lighting";
+> = false;
+
 uniform float u_SpecularScale
 <
 	string UIName = "Specular Strength";
