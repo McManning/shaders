@@ -579,7 +579,7 @@ GLSLShader GS
             return;
         }
 
-        if (u_SilhouetteDrawMode > 0) {
+        if (u_SilhouetteDrawMode > 0 && u_SilhouetteScale > EPSILON) {
             SilhouetteInfo s = getSilhouetteInfo();
             if (s.valid) {
                 // drawSilhouette(s);
@@ -604,7 +604,7 @@ GLSLShader GS
             }
         }
 
-        if (u_CreaseDrawMode < 1) {
+        if (u_CreaseDrawMode < 1 || u_CreaseScale < EPSILON) {
             return;
         }
 
@@ -869,10 +869,10 @@ GLSLShader PS
         float rim = 0;
         if (u_RimScale > 0) {
             float rimDot = 1 - max(dot(eyeDir, worldNormal), 0);
-            rim = rimDot; //* pow(NdotL, u_RimScale);
-            // rim = smoothstep(0.2 - 0.01, 0.2 + 0.01, rim);
+            rim = rimDot * pow(NdotL, u_RimScale);
+            rim = smoothstep(0.2 - 0.01, 0.2 + 0.01, rim);
             // rim = smoothstep(0.0, 0.01, rim); 
-            // rim = 1.0 - step(max(0, rim), 0.01);
+            rim = 1.0 - step(max(0, rim), 0.01);
         }
         
         // Shadow 
