@@ -4,6 +4,36 @@ import math
 
 CREASE_COLORSET = "crease"
 
+def damm(val):
+    # Damm Algorithm matrix is sourced from:
+    # https://en.wikibooks.org/wiki/Algorithm_Implementation/Checksums/Damm_Algorithm#Python
+    matrix = (
+        (0, 3, 1, 7, 5, 9, 8, 6, 4, 2),
+        (7, 0, 9, 2, 1, 5, 4, 8, 6, 3),
+        (4, 2, 0, 6, 8, 7, 1, 3, 5, 9),
+        (1, 7, 5, 0, 9, 8, 3, 4, 2, 6),
+        (6, 1, 2, 3, 0, 4, 5, 9, 7, 8),
+        (3, 6, 7, 4, 2, 0, 9, 5, 8, 1),
+        (5, 8, 6, 9, 7, 2, 0, 1, 3, 4),
+        (8, 9, 4, 5, 3, 6, 2, 0, 1, 7),
+        (9, 4, 3, 8, 6, 1, 7, 2, 0, 5),
+        (2, 5, 8, 1, 4, 3, 6, 7, 9, 0)
+    )
+
+    # interim = 0
+    # interim = matrix[interim][math.floor(val/ 100)]
+    # interim = matrix[interim][math.floor(val % 100 / 10)]
+    # interim = matrix[interim][val % 10]
+
+    # Needs to support 3 or 4 digit numbers, so stringify and loop
+    sval = str(int(val))
+    interim = 0
+
+    for c in sval:
+        interim = matrix[interim][int(c)]
+
+    return interim
+
 def about(window):
     """Prompt with an about dialog"""
     cmds.confirmDialog(
@@ -40,29 +70,34 @@ def setColorset():
     updateRenderOverride;
     """
 
-
-def crease(alpha=1.0):
-    """Modify the crease dataseat for the selected vertices"""
+def clear():
+    """Modify the crease dataset for the selected vertices"""
     setColorset()
     
     # Convert selection to vertices, set alpha channel for each, 
     # then convert back to the previous selection
     selected = cmds.ls(selection=True)
     cmds.select(cmds.polyListComponentConversion(tv=True))
-    cmds.polyColorPerVertex(a=alpha)
+    cmds.polyColorPerVertex(a=0)
     cmds.select(selected)
 
-    # TODO: It seems that clearing a crease will also recalculate
-    # vertex coloring in some way on Maya. Might be because we're
-    # splitting vertices by painting colors on faces, and then the
-    # update to the color at a vertex tries to re-combine on the 
-    # maya side. Maybe a recommended method for splitting colors
-    # is just to forcibly split the model?
+
+def crease(lod, mode, bump, thickness):
+    """Modify the crease dataset for the selected vertices"""
+    setColorset()
+    
+    a = makeAlpha(lod, mode, bump, thickness)
+
+    # Convert selection to vertices, set alpha channel for each, 
+    # then convert back to the previous selection
+    selected = cmds.ls(selection=True)
+    cmds.select(cmds.polyListComponentConversion(tv=True))
+    cmds.polyColorPerVertex(a=a)
+    cmds.select(selected)
 
 
-def selectCreases(alpha=None):
-    """Select all crease geometry in the object with the given alpha, or any non-zero alpha"""
-
+def selectCreases(lodIn=None):
+    """Select all crease geometry in the object with the given LOD (or all, if not specified)"""
     # TODO: Support subset selection (select matches that are a subset of what we already selected)
     selected = cmds.ls(selection=True)
     if len(selected) < 1:
@@ -71,12 +106,12 @@ def selectCreases(alpha=None):
     cmds.select(getParent(selected[0]), replace=True)
     cmds.select(cmds.polyListComponentConversion(tv=True))
 
-    lowerBound = 0.10 # LOD0
-    upperBound = 0.39 # LOD2 upper
+    lowerBound = 0
+    upperBound = 2
 
-    if alpha is not None:
-        lowerBound = alpha
-        upperBound = alpha + 0.09
+    if lodIn is not None:
+        lowerBound = lodIn
+        upperBound = lodIn
 
     vertices = cmds.ls(selection=True, flatten=True)
     alphas = cmds.polyColorPerVertex(query=True, a=True)
@@ -84,13 +119,15 @@ def selectCreases(alpha=None):
     # TODO: faster?
     subset = []
     for i in range(0, len(alphas)):
-        if alphas[i] >= lowerBound and alphas[i] <= upperBound:
+        lod, mode, bump, thickness = breakAlpha(alphas[i])
+        if lod >= lowerBound and lod <= upperBound:
             subset.append(vertices[i])
     
     cmds.select(subset, replace=True)
 
-def breakAlpha(a):
-    """Break alpha value into LOD, Bump, and Thickness
+
+def breakAlphaV1(a):
+    """(legacy) Break alpha value into LOD, Bump, and Thickness
 
         Currently uses 4 decimal places for the float, 
         which should be.. safe..ish..
@@ -100,11 +137,49 @@ def breakAlpha(a):
     thickness = math.floor(a * 10000) - lod * 1000 - bump * 100
     return (lod, bump, thickness)
 
-def makeAlpha(lod, bump, thickness):
-    """Make an alpha value from LOD/bump/thickness"""
-    # The extra 0.00001 is just to try to hammer out potential
-    # rounding errors at the lowest defined decimal. It's unused.
-    return (lod * 1000 + bump * 100 + thickness) * 0.0001 + 0.00001
+
+def breakAlpha(a):
+    """Break alpha value into LOD, Mode, Bump, and Thickness
+
+        Version 2 uses a 4 decimal places, 3 to pack the above
+        and the 4th as a checksum value for the packed values.
+    """
+    # Default value: invalid crease
+    lod = -1
+    mode = 0
+    bump = 0
+    thickness = 0
+
+    # Only extract from alphas with a valid checksum
+    checksum = damm(math.floor(a * 10000))
+    if checksum == 0:
+        x = int(math.floor(a * 1000))
+        lod = (x & 768) / 256
+        mode = (x & 192) / 64
+        bump = (x & 32) / 32
+        thickness = x & 31
+
+    return (lod, mode, bump, thickness)
+
+
+def makeAlpha(lod, mode, bump, thickness):
+    """Make an alpha value from LOD/mode/bump/thickness"""
+    # Re-encode components into a single value
+    a = int(lod) * 256 | int(mode) * 64 | int(bump) * 32 | int(thickness)
+
+    # print('makeAlpha a: {}'.format(a))
+
+    # Offset to the [0,1) range and append a checksum
+    # An extra 0.00001 is added to correct for rounding errors 
+    # with pushing between Python and Maya. Unused in decoding.
+    checksum = damm(a)
+    # print('makeAlpha checksum: {}'.format(checksum))
+
+    a = (a * 100.0 + checksum * 10.0 + 1) / 100000.0
+
+    # print('makeAlpha final: {}'.format(a))
+    return a
+
 
 def bumpCrease():
     """Update creased vertices in a way s.t. they cannot connect
@@ -128,9 +203,14 @@ def bumpCrease():
     # Have to loop instead of polyColorPerVertex all at once
     # because we need to maintain LOD/thickness parts.
     for i in range(0, len(alphas)):
-        lod, bump, thickness = breakAlpha(alphas[i])
+        lod, mode, bump, thickness = breakAlpha(alphas[i])
+        print('Bump from {} - {}, {}, {}, {}'.format(alphas[i], lod, mode, bump, thickness))
+        a = makeAlpha(lod, mode, 1, thickness)
+        print(a)
+        lod, mode, bump, thickness = breakAlpha(a)
+        print('New alpha {} - {}, {}, {}, {}'.format(a, lod, mode, bump, thickness))
         cmds.select(vertices[i], replace=True)
-        cmds.polyColorPerVertex(a=makeAlpha(lod, 1, thickness))
+        cmds.polyColorPerVertex(a=a)
 
     # Restore selection
     cmds.select(selected, replace=True)
@@ -141,7 +221,7 @@ def sharpenCrease(slider):
         until the last vertex in the selection
     """
     min_thickness = cmds.floatSliderGrp(slider, query=True, value=True)
-    min_thickness = max(0, min(min_thickness * 100, 99))
+    min_thickness = min_thickness * 31
 
     selected = cmds.ls(orderedSelection=True, flatten=True)
     if len(selected) < 1:
@@ -151,7 +231,7 @@ def sharpenCrease(slider):
     # cmds.select(cmds.polyListComponentConversion(tv=True))
     
     alphas = cmds.polyColorPerVertex(query=True, a=True)
-    lod, bump, thickness = breakAlpha(alphas.pop())
+    lod, mode, bump, thickness = breakAlpha(alphas.pop())
 
     # If minimum is greater than maximum, then all vertices will
     # gain the same thickness 
@@ -167,19 +247,19 @@ def sharpenCrease(slider):
     print(max_thickness)
 
     cmds.select(selected[-1], replace=True)
-    cmds.polyColorPerVertex(a=makeAlpha(lod, bump, max_thickness))
+    cmds.polyColorPerVertex(a=makeAlpha(lod, mode, bump, max_thickness))
     
     # Set every other vert in the list to increment to the local maximum 
     flen = len(alphas) * 1.0
     for i in range(0, len(alphas)):
-        lod, bump, thickness = breakAlpha(alphas[i])
+        lod, mode, bump, thickness = breakAlpha(alphas[i])
         thickness = min_thickness + (i / flen) * (max_thickness - min_thickness)
 
         print(selected[i])
         print(thickness)
 
         cmds.select(selected[i], replace=True)
-        cmds.polyColorPerVertex(a=makeAlpha(lod, bump, thickness))
+        cmds.polyColorPerVertex(a=makeAlpha(lod, mode, bump, thickness))
 
     # Restore selection
     cmds.select(selected, replace=True)
@@ -219,6 +299,21 @@ def resetMesh():
     # Restore selection
     cmds.select(selected, replace=True)
 
+def testA():
+    selected = cmds.ls(selection=True)
+    cmds.select(cmds.polyListComponentConversion(tv=True))
+    alphas = cmds.polyColorPerVertex(query=True, a=True)
+
+    for alpha in alphas:
+        lod, mode, bump, thickness = breakAlpha(alpha)
+        print('{} - LOD: {}, Mode: {}, Bump: {}, Thickness: {}'.format(
+            alpha, lod, mode, bump, thickness
+        ))
+
+    # Restore selection
+    cmds.select(selected, replace=True)
+
+
 def addMenuBar(window):
     """Add dropdown menu bar"""
     cmds.menuBarLayout()
@@ -233,10 +328,10 @@ def addCreaseGroup(window):
     cmds.text(label="Words here")
 
     cmds.rowLayout(numberOfColumns=4)
-    cmds.button(label="Clear Selected", command="crease(0.0)")
-    cmds.button(label="Crease (LOD0)", command="crease(0.10991)")
-    cmds.button(label="Crease (LOD1)", command="crease(0.20991)")
-    cmds.button(label="Crease (LOD2)", command="crease(0.30991)")
+    cmds.button(label="Clear Selected", command="clear()")
+    cmds.button(label="Crease (LOD0)", command="crease(0, 0, 0, 31)")
+    cmds.button(label="Crease (LOD1)", command="crease(1, 0, 0, 31)")
+    cmds.button(label="Crease (LOD2)", command="crease(2, 0, 0, 31)")
     cmds.setParent("..")
 
     cmds.rowLayout(numberOfColumns=4)
@@ -259,18 +354,18 @@ def addCreaseGroup(window):
     cmds.button(label="Sharpen", command="sharpenCrease(\"" + slider + "\")")
 
     cmds.setParent("..")
-
     cmds.setParent("..")
 
 def addMiscGroup(window):
     """Misc relevant tools"""
     cmds.frameLayout(label="Misc Tools")
-    cmds.rowLayout(numberOfColumns=4)
+    cmds.rowLayout(numberOfColumns=5)
 
     cmds.button(label="Soften all edges", command="softenModel()")
     cmds.button(label="Delete History", command="cmds.DeleteHistory()")
     cmds.button(label="Bump Crease", command="bumpCrease()")
     cmds.button(label="Reset Mesh", command="resetMesh()")
+    cmds.button(label="Test A", command="testA()")
 
     cmds.setParent("..")
     cmds.setParent("..")
@@ -282,7 +377,7 @@ def openEditor():
 
     addMenuBar(window)
     addCreaseGroup(window)
-    cmds.separator(height=10, style="none")
+    # cmds.separator(height=10, style="none")
     addMiscGroup(window)
     
     cmds.showWindow(window)

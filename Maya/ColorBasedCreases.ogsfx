@@ -1,4 +1,4 @@
-#version 410
+#version 430
 
 #include "Utility.ogsfh"
 #include "Settings.ogsfh"
@@ -120,8 +120,7 @@ GLSLShader GS
      * Draw a screen-space (billboarded) arrow pointing 
      * at the given world space position
      */
-    void drawVertexMarker(vec4 v) 
-    {
+    void drawVertexMarker(vec4 v) {
         v = u_ViewProjMatrix * v;
         
         // Extract aspect ratio from the projection matrix
@@ -480,37 +479,17 @@ GLSLShader GS
      *
      * @return boolean
      */
-    bool isValidCrease(int idx, int nextIdx, int lod) {
-        // TODO: less hardcoding.
-        float low = 0.10; // LOD0 - 0.1X
-
-        if (lod == 1) { // LOD1 - 0.2X
-            low = 0.20;
-        } else if (lod == 2) { // LOD2 - 0.3X
-            low = 0.30;
-        }
-
-        // Alpha digits follow the pattern:
-        // 0.LBTT where:
-        // L - LOD level 
-        // B - "Bump" value (1 or 0) - Only 0's and 0-1 can connect.
-        // TT - Thickness from 0 to 99 (later normalized)
-
-        float a = gsin[idx].color.a;
-        float b = gsin[nextIdx].color.a;
-
-        int aLOD = int(floor(a * 10));
-        int bLOD = int(floor(b * 10));
-
-        int aBump = int(floor(a * 100)) - aLOD * 10;
-        int bBump = int(floor(b * 100)) - bLOD * 10;
-        
+    bool isValidCrease(CreaseInfo info, CreaseInfo nextInfo, int lod) {
         // Increasing vertex IDs, both at *least* the 
         // input LOD, *and* one of them is an exact 
-        // crease vertex (0.X0)
-        return (gsin[idx].id < gsin[nextIdx].id) &&
-            (aLOD >= lod + 1 && bLOD >= lod + 1) &&
-            (aBump == 0 || bBump == 0);
+        // crease vertex
+        if (!info.valid || !nextInfo.valid) {
+            return false;
+        }
+
+        return (info.id < nextInfo.id) &&
+            (info.lod >= lod && nextInfo.lod >= lod) &&
+            (info.bump == false || nextInfo.bump == false);
     }
 
     /**
@@ -622,22 +601,22 @@ GLSLShader GS
             // Copy forward to all crease geometry
             o.color = gsin[idx].color;
 
-            if (isValidCrease(idx, nextIdx, lod)) {
-                // Extract thickness at each end
-                // Stored in 'TT' decimal places of alpha 0.LBTT 
-                float thickness = gsin[idx].color.a;
-                float nextThickness = gsin[nextIdx].color.a;
-                thickness = thickness * 100 - floor(thickness * 100);
-                nextThickness = nextThickness * 100 - floor(nextThickness * 100);
+            // Extract crease information at each vertex
+            CreaseInfo info = extractCreaseInfo(gsin[idx].color.a);
+            info.id = gsin[idx].id;
 
+            CreaseInfo nextInfo = extractCreaseInfo(gsin[nextIdx].color.a);
+            nextInfo.id = gsin[nextIdx].id;
+
+            if (isValidCrease(info, nextInfo, lod)) {
                 drawEdge(
                     gsin[idx].worldPosition, 
                     gsin[nextIdx].worldPosition,
                     gsin[idx].normal, 
                     gsin[nextIdx].normal,
                     u_CreaseScale,
-                    thickness, 
-                    nextThickness
+                    info.thickness, 
+                    nextInfo.thickness
                 );
             }
         }
@@ -1072,7 +1051,7 @@ technique Main
     >
 	{
 		VertexShader (in appdata, out vs_to_gs o) = VS;
-		GeometryShader (in vs_to_gs gsin, out gs_to_ps o) = GS;
+		GeometryShader (in vs_to_gs gsin, out gs_to_ps o) = { Utility, GS };
 		PixelShader (in gs_to_ps i, out ps_out) = { Utility, PS };
 	}
     
