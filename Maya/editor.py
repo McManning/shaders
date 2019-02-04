@@ -299,6 +299,39 @@ def resetMesh():
     # Restore selection
     cmds.select(selected, replace=True)
 
+def migrate1to2():
+    """Migrate version 1 of the alpha set of a mesh to version 2.
+    
+        v2 adds an extra 'mode' value (0-3), reduces storage space 
+        of thickness to [0, 31], clumps values closer together with
+        the amount of bits actually needed and then adds a Damm algorithm
+        checksum as a last digit. 
+    """
+    selected = cmds.ls(selection=True)
+    cmds.select(cmds.polyListComponentConversion(tv=True))
+
+    vertices = cmds.ls(selection=True, flatten=True)
+    alphas = cmds.polyColorPerVertex(query=True, a=True)
+
+    for i in range(len(alphas)):
+        lod, bump, thickness = breakAlphaV1(alphas[i])
+        mode = 0 # Not supported in v1, assume default mode 0
+
+        if (lod > 0):
+            # Scale thickness down to [0,31] from [0,99]
+            thickness = math.floor(thickness / 3.1)
+
+            # Lower LOD by 1 value so LOD0 = 0, etc
+            lod = lod - 1
+
+            a = makeAlpha(lod, mode, bump, thickness)
+
+            cmds.select(vertices[i], replace=True)
+            cmds.polyColorPerVertex(a=a)
+    
+    # Restore selection
+    cmds.select(selected, replace=True)
+
 def testA():
     selected = cmds.ls(selection=True)
     cmds.select(cmds.polyListComponentConversion(tv=True))
@@ -370,6 +403,14 @@ def addMiscGroup(window):
     cmds.setParent("..")
     cmds.setParent("..")
 
+def addLegacyGroup(window):
+    cmds.frameLayout(label="Legacy")
+
+    cmds.rowLayout(numberOfColumns=4)
+    cmds.button(label="Migrate 1->2", command="migrate1to2()")
+
+    cmds.setParent("..")
+    cmds.setParent("..")
 
 def openEditor():        
     window = cmds.window(title="Shader Tools", iconName="Shader Tools") # , widthHeight=(200, 55))
@@ -379,6 +420,7 @@ def openEditor():
     addCreaseGroup(window)
     # cmds.separator(height=10, style="none")
     addMiscGroup(window)
+    addLegacyGroup(window)
     
     cmds.showWindow(window)
 
