@@ -2,81 +2,297 @@
 
 uniform mat4 u_MVPMatrix : WorldViewProjection;
 uniform mat4 u_ModelMatrix : World;
-uniform mat4 u_NormalMatrix : WorldInverseTranspose;
 
-// Camera world space position would be u_CameraMatrix[3].xyz
 uniform mat4 u_CameraMatrix : ViewInverse;
 
-uniform float u_LOD1Distance
+uniform vec3 u_BoundingBox
 <
-	string UIGroup = "LOD";
-	string UIName = "LOD1 Distance";
-> = 10.0;
+    string UIGroup = "LOD";
+    string UIName = "BBox";
+> = {1.0, 1.0, 1.0};
 
-uniform float u_LOD2Distance
+// Default to LOD1 @ 66% of screen, LOD2 @ 33%
+uniform float u_LOD1
 <
 	string UIGroup = "LOD";
-	string UIName = "LOD2 Distance";
-> = 20.0;
+	string UIName = "LOD1";
+> = 0.667;
+
+uniform float u_LOD2
+<
+	string UIGroup = "LOD";
+	string UIName = "LOD2";
+> = 0.333;
 
 // ---------------------------------------------
 // Shader inputs/outputs
 // ---------------------------------------------
 attribute appdata
 {
-	vec3 vertex : POSITION;
+	vec4 vertex : POSITION;
 	vec3 normal : NORMAL;
 };
 
-attribute v2f
+attribute shaderdata
 {
-	vec3 vertex : POSITION;
+	vec4 vertex : POSITION;
 	vec3 normal : NORMAL;
-    vec4 col : COLOR0;
+    vec4 color : COLOR0;
 };
 
-attribute frag_out
+attribute ps_out
 {
-	vec4 col : COLOR0;
+	vec4 color : COLOR0;
 };
 
-GLSLShader vert
+GLSLShader VS
 {
-	void main()
-	{
+	void main() {
 		o.normal = normal;
         o.vertex = vertex;
-
-        vec4 cam = u_CameraMatrix[3];
-        vec4 origin = u_ModelMatrix * vec4(0, 0, 0, 1);
-        
-        float d = distance(cam, origin);
-        o.col.rgb = vec3(d) * 0.001;
-    
-        int lod = 0;
-        if (d > u_LOD2Distance) {
-            lod = 2;
-        } else if (d > u_LOD1Distance) {
-            lod = 1;
-        }
-
-        if (lod < 1) { // LOD0
-            o.col = vec4(1, 0, 0, 1);
-        } else if (lod < 2) { // LOD1
-            o.col = vec4(0, 1, 0, 1);
-        } else if (lod < 3) { // LOD2
-            o.col = vec4(0, 0, 1, 1);
-        }
-
-        gl_Position = u_MVPMatrix * vec4(vertex, 1);
 	}
 }
 
-GLSLShader frag
+GLSLShader GS
 {
-	void main()
-	{
-        col = i.col;
+    layout(triangles) in;
+    layout(triangle_strip, max_vertices = 32) out;
+
+    void drawInputGeometry() {
+        o.color = vec4(1);
+
+        for (int idx = 0; idx < 3; idx++) {
+            o.vertex = i[idx].vertex;
+            o.normal = i[idx].normal;
+
+            gl_Position = u_MVPMatrix * o.vertex;
+            EmitVertex();
+        }
+
+        EndPrimitive();
+    }
+
+    void drawBBox() {
+        vec3 b = u_BoundingBox * 0.5;
+
+        // Front face
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        // back face
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, -b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, -b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, -b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+        
+        EndPrimitive();
+
+        // Left face
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, -b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+        
+        EndPrimitive();
+
+        // Right face
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, b.z, 1);
+        o.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, -b.z, 1);
+        o.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, -b.z, 1);
+        o.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+        
+        EndPrimitive();
+
+        // Idc about top/bottom
+        // Also could technically be accomplished with less vertices
+        // and just one giant wrapped box, but who cares. This is for debugging.
+    }
+
+    void main() {
+        drawInputGeometry();
+
+        // Run once
+        if (gl_PrimitiveIDIn == 0) {
+            drawBBox();
+        }
+    }
+}
+
+GLSLShader PS
+{
+    float getScreenCoverage() {
+        float halfWidth = u_BoundingBox.x * 0.5;
+        float halfDepth = u_BoundingBox.z * 0.5;
+        float height = u_BoundingBox.y * 0.5;
+        
+        // BBox corners in local space
+        vec4 p[8];
+        p[0] = vec4(halfWidth, halfDepth, height, 1);
+        p[1] = vec4(halfWidth, -halfDepth, height, 1);
+        p[2] = vec4(-halfWidth, halfDepth, height, 1);
+        p[3] = vec4(halfWidth, halfDepth, -height, 1);
+        p[4] = vec4(-halfWidth, -halfDepth, height, 1);
+        p[5] = vec4(halfWidth, -halfDepth, -height, 1);
+        p[6] = vec4(-halfWidth, halfDepth, -height, 1);
+        p[7] = vec4(-halfWidth, -halfDepth, -height, 1);
+
+        int i;
+
+        // Convert to NDC 
+        for (i = 0; i < 8; i++) {
+            p[i] = u_MVPMatrix * p[i];
+            p[i] /= p[i].w;
+        }
+
+        // Find minimum/maximum points
+        float hmin = p[0].x;
+        float hmax = p[0].x;
+        float vmin = p[0].y;
+        float vmax = p[0].y;
+
+        for (i = 1; i < 8; i++) {
+            hmin = min(hmin, p[i].x);
+            hmax = max(hmax, p[i].x);
+            vmin = min(vmin, p[i].y);
+            vmax = max(vmax, p[i].y);
+        }
+
+        // Convert min/max to range [0, 2]
+        hmin = clamp(hmin + 1, 0.0, 2.0);
+        hmax = clamp(hmax + 1, 0.0, 2.0);
+        vmin = clamp(vmin + 1, 0.0, 2.0);
+        vmax = clamp(vmax + 1, 0.0, 2.0);
+
+        // Calculate area 
+        float area = (hmax - hmin) * (vmax - vmin);
+
+        // Calculate percentage of total space used
+        return clamp(area / 4.0, 0.0, 1.0);
+    }
+
+    /**
+    * Return current LOD of the model based on BBox screen coverage
+    *
+    * @return int [0, 2]
+    */
+    int getCurrentLOD() {
+        int lod = 0;
+        float coverage = getScreenCoverage();
+
+        // Switch LOD if screen coverage is 
+        // less than the upper bound at each LOD
+        if (coverage < u_LOD2) {
+            lod = 2;
+        } else if (coverage < u_LOD1) {
+            lod = 1;
+        }
+
+        return lod;
+    }
+
+
+	void main() {
+        // color = i.color;
+
+        // Discard bbox interior
+        if (i.color.x < 0.99 && i.color.y < 0.99) {
+            discard;
+        }
+
+        // Colorize based on computed LOD (black = LOD0, grey = LOD1, white = LOD2)
+        int lod = getCurrentLOD();
+
+        color.rgb = vec3(lod * 0.5);
+
+        // color.rgb = vec3(getScreenCoverage());
 	}
 }
 
@@ -84,7 +300,8 @@ technique Main
 {
 	pass p0
 	{
-		VertexShader (in appdata, out v2f o) = vert;
-		PixelShader (in v2f i, out frag_out) = frag;
+		VertexShader (in appdata, out shaderdata o) = VS;
+        GeometryShader (in shaderdata i, out shaderdata o) = GS;
+		PixelShader (in shaderdata i, out ps_out) = PS;
 	}
 }
