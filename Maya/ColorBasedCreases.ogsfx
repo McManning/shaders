@@ -3,267 +3,301 @@
 #include "Utility.ogsfh"
 #include "Settings.ogsfh"
 
+// Mode constants
+#define MODE_CREASE_0 0.0
+#define MODE_CREASE_1 0.1
+#define MODE_CREASE_2 0.2
+#define MODE_CREASE_3 0.3
+
+// High values for geo/silh (can't be packed into color.a)
+#define MODE_GEOMETRY 0.4
+#define MODE_SILHOUETTE 0.9
+
+/**
+ * Data passed through the pipeline is pretty uniformly structured
+ * throughout every step. position/normal go from local -> world when
+ * moving between GS to PS, and data1 gets re-interpreted based on
+ * the needs of each step.
+ */
 attribute appdata {
-    vec3 position       : POSITION;
-	vec3 normal         : NORMAL;
-    vec4 color          : COLOR0;
-    vec2 uv             : TEXCOORD0;
-};
- 
-attribute vs_to_gs {
-    vec4 worldPosition  : POSITION;
-	vec3 normal         : NORMAL;
-    vec3 uv             : TEXCOORD0;
-    vec4 color          : TEXCOORD1;
-    vec4 data1          : TEXCOORD2;
-    int id              : TEXCOORD3;
+    vec4 position   : POSITION;
+    vec3 normal     : NORMAL;
+    vec2 uv         : TEXCOORD0;
+    vec4 color      : COLOR0;
 };
 
-attribute gs_to_ps {
-    vec4 worldPosition  : POSITION;
-	vec3 worldNormal    : NORMAL;
-    vec3 uv             : TEXCOORD0;
-    vec4 color          : TEXCOORD1;
+attribute shaderdata {
+    vec4 position   : POSITION;
+    vec3 normal     : NORMAL;
+    vec3 uv         : TEXCOORD0;
+    vec4 color      : COLOR0;
 
-    // encoded data, meaning changes based on the generator of the vertex.
-    // color.a defines the encoding (normal face, silhouette, crease)
-    // normal face: xyz is the distance to the opposite edge (for wireframe drawing)
-    // silhouette: TBD
-    // crease: xy is the crease edge start position, zw is end position
-    // vec4 encoded : TEXCOORD1;
-    vec4 dist           : TEXCOORD2;
+    // Extra data to pass through the pipeline.
+    // data1.x is a vertex MODE constant, data1.y is 
+    // silhouette flag or vertex ID depending on step
+    vec3 data1     : TEXCOORD1;
+
+    // Currently used for wireframe rendering.
+    // TODO: Would like to shove that into data1 if possible.
+    // Maybe swap mode back to color.a since that channel isn't
+    // being used when going from GS -> PS
+    vec3 data2     : TEXCOORD2;
 };
 
 attribute ps_out {
-    vec4 color          : COLOR0;
+    vec4 color      : COLOR0;
 };
 
 GLSLShader VS
 {
-    void main()
-    {
-        o.worldPosition = u_ModelMatrix * vec4(position, 1);
-        o.normal = normal; // (u_ModelMatrix * vec4(normal, 0)).xyz;
-        o.color = color; // color.aaaa; // temp swizzle of alpha in every color bit for debug
-        o.uv = vec3(uv, 0);
-        o.id = gl_VertexID; // Used for crease detection
+    void main() {
+        // Copy data forward
+        vsout.position = position;
+        vsout.normal = normal;
+        vsout.uv = vec3(uv, 0);
+        vsout.color = color;
+        vsout.data1.x = MODE_GEOMETRY;
+        vsout.data1.y = gl_VertexID;
+    }
+}
 
-        vec4 camPos = u_CameraMatrix[3]; 
-        
-        o.data1.xyz = position;
-        
-        // NdotV of the vertex
-        o.data1.w = dot(u_ModelMatrix * vec4(normal, 0), camPos - o.worldPosition);
+patchsize 3;
+GLSLShader TCS
+{
+    void main() {
+        const uint idx = gl_InvocationID;
+        const uint nextIdx = (idx + 1) % 3;
+        const uint oppositeIdx = (nextIdx + 1) % 3;
+        int i;
 
-        // gl_Position = u_MVPMatrix * vec4(position, 1);
+        tcsout[gl_InvocationID].position = tcsin[gl_InvocationID].position;
+        tcsout[gl_InvocationID].normal = tcsin[gl_InvocationID].normal;
+        tcsout[gl_InvocationID].uv = tcsin[gl_InvocationID].uv;
+        tcsout[gl_InvocationID].color = tcsin[gl_InvocationID].color;
+        tcsout[gl_InvocationID].data1 = tcsin[gl_InvocationID].data1;
+
+        float a = tcsin[gl_InvocationID].color.a;
+
+        tcsout[gl_InvocationID].data1.z = 1;
+
+        // If there's valid data encoded in the alpha channel, parse
+        EdgeInfo info = unpackEdgeInfo(a, int(tcsin[idx].data1.y));
+        if (info.valid) {
+            // Could either be an edge between idx -> nextIdx and idx -> oppositeId
+            EdgeInfo nextInfo = unpackEdgeInfo(tcsin[nextIdx].color.a, int(tcsin[nextIdx].data1.y));
+            EdgeInfo oppositeInfo = unpackEdgeInfo(tcsin[oppositeIdx].color.a, int(tcsin[oppositeIdx].data1.y));
+
+            // If the vertex is part of a drawable edge, repack edge info to something
+            // that is easier to interpolate later.
+            if (isValidEdge(info, nextInfo) || isValidEdge(oppositeInfo, info)) {
+                tcsout[gl_InvocationID].data1.x = info.mode * 0.1;
+                tcsout[gl_InvocationID].color.a = info.thickness;
+            }
+        }
+        
+        // Calculate which input patches would be on the silhouette. 
+        // This lets us run this calculation on less geometry - and then 
+        // we only re-run it in the geometry shader once we know we're in 
+        // a matching patch. 
+        float NdotV[3];
+        vec3 worldPos;
+
+        // Calculate NdotV's of each vertex
+        for (i = 0; i < 3; i++) {
+            worldPos = (u_ModelMatrix * tcsin[i].position).xyz;
+            NdotV[i] = dot(
+                (u_ModelMatrix * vec4(tcsin[i].normal, 0)).xyz,
+                u_CameraMatrix[3].xyz - worldPos
+            );
+        }
+
+        tcsout[gl_InvocationID].data1.y = 0;
+
+        // Test for a valid silhouette triangle and flag accordingly
+        if (getSilhouetteControlIndex(NdotV) >= 0) {
+            // TODO: It'd be smarter to pack this into x alongside crease - 
+            // we need to be able to store both crease mode + silhouette 
+            // on the same triangle.
+            tcsout[gl_InvocationID].data1.y = MODE_SILHOUETTE;
+        }
+
+        // Calculate tessellation factor for a single invocation
+        if (gl_InvocationID == 1) {
+            gl_TessLevelOuter[0] = u_TessOuter;
+            gl_TessLevelOuter[1] = u_TessOuter;
+            gl_TessLevelOuter[2] = u_TessOuter;
+
+            gl_TessLevelInner[0] = u_TessInner;
+        }
+    }
+}
+
+tesparams(triangles, equal_spacing, ccw);
+GLSLShader TES
+{
+    void main() {
+        int i;
+
+        // Barycentric coordinates of the output vertex
+        // in relation to the 3 input vertices in the TCS
+        float U = gl_TessCoord.x;
+        float V = gl_TessCoord.y;
+        float W = gl_TessCoord.z;
+
+        // Basic interpolation
+        tesout.normal = tesin[0].normal * U + tesin[1].normal * V + tesin[2].normal * W;
+        tesout.uv = tesin[0].uv * U + tesin[1].uv * V + tesin[2].uv * W;
+        tesout.color = tesin[0].color * U + tesin[1].color * V + tesin[2].color * W;
+        tesout.data1 = tesin[0].data1 * U + tesin[1].data1 * V + tesin[2].data1 * W;
+
+        // Just copy forward for flat tessellation
+        vec3 position = tesin[0].position.xyz * U +
+                        tesin[1].position.xyz * V +
+                        tesin[2].position.xyz * W;
+
+        // Projection of the vertex into a tangent plane for each dominant vertex
+        vec3 pU = projectOntoPlane(position, tesin[0].position.xyz, tesin[0].normal.xyz);
+        vec3 pV = projectOntoPlane(position, tesin[1].position.xyz, tesin[1].normal.xyz);
+        vec3 pW = projectOntoPlane(position, tesin[2].position.xyz, tesin[2].normal.xyz);
+
+        // Compute barycentric interpolation of each projection
+        vec3 phongTess = U * pU + V * pV + W * pW;
+
+        // Set position as an interpolation between linear and phong tessellation
+        tesout.position = vec4(lerp(position, phongTess, u_TessShapeFactor), 1);
+
+        // Calculate face render mode (crease, silhouette, geo)
+        // Not necessary - will interp to still be the same value.
+        // if (cmp(tesin[0].data1.y, MODE_SILHOUETTE) &&
+        //     cmp(tesin[1].data1.y, MODE_SILHOUETTE) &&
+        //     cmp(tesin[2].data1.y, MODE_SILHOUETTE)
+        // ) {
+        //     // If the patch was marked as being on a silhouette, mark every
+        //     // interior vertex as well. It'll be up to the geometry shader to
+        //     // re-evaluate normals again to determine the triangle subset
+        //     tesout.data1.y = MODE_SILHOUETTE;
+        // }
+
+        // Test for vertices that lie on the edge between two creases,
+        // and also mark those as crease points.
+
+        // TODO: I don't think the below is necessary? It'll already interpolate
+        // to the same value if they're both already crease points...
+        // we just need to round off the final number to be certain instead 
+        // of an interp from 0 -> crease
+
+        bool e[3];
+        for (i = 0; i < 3; i++) {
+            e[i] = tesin[i].data1.x <= MODE_CREASE_3;
+        }
+
+        // TODO: Technically this will copy 1's mode into 2. But I can't
+        // think of a reason why that would be a problem in production?
+        float mode = MODE_GEOMETRY;
+        
+        if (W < EPSILON && e[0] && e[1]) {
+            mode = tesin[0].data1.x;
+        } else if (U < EPSILON && e[1] && e[2]) {
+            mode = tesin[1].data1.x;
+        } else if (V < EPSILON && e[2] && e[0]) {
+            mode = tesin[2].data1.x;
+        }
+
+        tesout.data1.x = mode;
     }
 }
 
 GLSLShader GS
 {
     layout(triangles) in;
-    layout(triangle_strip, max_vertices = 32) out;
-
-    float distanceToLine(vec3 point, vec3 a, vec3 b)
-    {
-        return length(cross(point - a, point - b)) / length(b - a);
-    }
-
-    float area(vec3 v0, vec3 v1, vec3 v2) 
-    {
-        return length(cross(v2 - v0, v2 - v1)) * 0.5;
-    }
+    layout(triangle_strip, max_vertices = 16) out;
 
     vec3 xprime(float di, float dj, vec3 xi, vec3 xj) {
         float L = abs(di) + abs(dj);
         return (abs(dj) / L) * xi + (abs(di) / L) * xj;
     }
 
-    void drawCreaseDebug(vec4 v0, vec4 v1, vec3 n0, vec3 n1)
-    {
-        vec3 start = v0.xyz + normalize(n0) * 0.01;
-        vec3 end = v1.xyz + normalize(n1) * 0.01;
-        vec3 right = start + normalize(cross(start - end, n0)) * 0.1;
-
-        gl_Position = u_ViewProjMatrix * vec4(start, 1);
-        EmitVertex();
-
-        gl_Position = u_ViewProjMatrix * vec4(end, 1);
-        EmitVertex();
-
-        gl_Position = u_ViewProjMatrix * vec4(right, 1);
-        EmitVertex();
-
-        EndPrimitive();
-    }
-
-    bool isBackface(vec3 v0, vec3 v1, vec3 v2) {
-        vec3 N = cross(v1 - v0, v2 - v0);
-        vec3 center = (v0 + v1 + v2) / 3;
-        return dot(center - u_CameraMatrix[3].xyz, N) >= 0;
-    }
-
     /**
-     * Draw a screen-space (billboarded) arrow pointing 
-     * at the given world space position
+     * Calculate distance between a vertex and its opposite edge
+     *
+     * See: Bærentzen, J. A., Munk-Lund, S., Gjøl, M., & Larsen, B. D. (2008). 
+     * Two Methods for Antialiased Wireframe Drawing with Hidden Line Removal. 
+     * http://orbit.dtu.dk/files/3735323/wire-sccg.pdf
+     *
+     * @param int idx Vertex index in the GS input
+     * 
+     * @return vec3
      */
-    void drawVertexMarker(vec4 v) {
-        v = u_ViewProjMatrix * v;
-        
-        // Extract aspect ratio from the projection matrix
-        // where m00 = 1/(aspect * tan(FOV / 2)) and m11 = 1/tan(FOV / 2)
-        float aspect = u_ProjMatrix[0][0] / u_ProjMatrix[1][1];
+    vec3 getOppositeEdgeDistanceVec(int idx) {
+        int nextIdx = (idx + 1) % 3;
+        int nextIdx2 = (nextIdx + 1) % 3;
 
-        gl_Position = v;
-        EmitVertex();
+        // Vertex to edge distance calculations for wireframe rendering
+        // as part of our fragment coloring (instead of a separate technique)
+        vec4 v0 = u_ViewProjMatrix * gsin[idx].position;
+        vec4 v1 = u_ViewProjMatrix * gsin[nextIdx].position;
+        vec4 v2 = u_ViewProjMatrix * gsin[nextIdx2].position;
 
-        // add some extra verts for testing
-        gl_Position = v + vec4(-0.1 * aspect, 0.1, 0, 0);
-        EmitVertex();
-        
-        gl_Position = v + vec4(0.1 * aspect, 0.1, 0, 0);
-        EmitVertex();
+        float d = distanceToLine(v0.xyz, v1.xyz, v2.xyz);
 
-        EndPrimitive();
+        if (idx == 0) {
+            return vec3(d, 0, 0);
+        } else if (idx == 2) {
+            return vec3(0, d, 0);
+        } else {
+            return vec3(0, 0, d);
+        }
     }
 
     struct SilhouetteInfo {
-        bool valid;
-
         vec3 startPos;
         vec3 endPos;
         vec3 startNormal;
         vec3 endNormal;
     };
 
-    /**
-     * Calculate silhouette edge information for the input triangle
-     */
-    SilhouetteInfo getSilhouetteInfo() {
-        // NdotV values of each vertex
-        float d0 = gsin[0].data1.w;
-        float d1 = gsin[1].data1.w;
-        float d2 = gsin[2].data1.w;
-        
-        // Offset NdotV by 0.1 so we always have a nonzero.
-        // .: +1 for >= 0, -1 for < 0
-        float s0 = sign(d0 + 0.0001);
-        float s1 = sign(d1 + 0.0001);
-        float s2 = sign(d2 + 0.0001);
+    SilhouetteInfo getSilhouetteInfo(int controlIdx, float NdotV[3]) {
+        SilhouetteInfo info;
+        int nextIdx = (controlIdx + 1) % 3;
+        int oppositeIdx = (nextIdx + 1) % 3;
 
-        SilhouetteInfo s;
-
-        // All are toward or away from the view, early exit.
-        if (s0 == s1 && s1 == s2) {
-            s.valid = false;
-            return s;
-        }
-
-        // Pick indices based on which normal is pointing away from us,
-        // where idx has a normal pointing away, and the other two are
-        // still toward the camera. 
-        int idx, next, opposite;
-        if (s0 != s1 && s0 != s2) {
-            idx = 0;
-            next = 1;
-            opposite = 2;
-        } else if (s1 != s0 && s1 != s2) {
-            idx = 1;
-            next = 0;
-            opposite = 2;
-        } else if (s2 != s0 && s2 != s1) {
-            idx = 2;
-            next = 0;
-            opposite = 1;
-        }
-
-        // Reorder values by idx -> next -> opposite
-        d0 = gsin[idx].data1.w;
-        d1 = gsin[next].data1.w;
-        d2 = gsin[opposite].data1.w;
-
-        vec3 v0 = gsin[idx].data1.xyz;
-        vec3 v1 = gsin[next].data1.xyz;
-        vec3 v2 = gsin[opposite].data1.xyz;
-
-        vec3 n0 = gsin[idx].normal;
-        vec3 n1 = gsin[next].normal;
-        vec3 n2 = gsin[opposite].normal;
+        vec3 vControl = gsin[controlIdx].position.xyz;
+        vec3 vNext = gsin[nextIdx].position.xyz;
+        vec3 vOpposite = gsin[oppositeIdx].position.xyz;
 
         // Weighted silhouette points
-        s.startPos = xprime(d0, d1, v0, v1);
-        s.endPos = xprime(d0, d2, v0, v2);
+        info.startPos = xprime(NdotV[controlIdx], NdotV[nextIdx], vControl, vNext);
+        info.endPos = xprime(NdotV[controlIdx], NdotV[oppositeIdx], vControl, vOpposite);
 
         // Normal is the interp of the two end normals
-        float L = distance(v0, s.startPos) / distance(v0, v1);
-        s.startNormal = lerp(n0, n1, L);
+        float L = distance(vControl, info.startPos) / distance(vControl, vNext);
+        info.startNormal = lerp(gsin[controlIdx].normal, gsin[nextIdx].normal, L);
 
-        L = distance(v0, s.endPos) / distance(v0, v2);
-        s.endNormal = lerp(n0, n2, L);
-        
-        s.valid = true;
-        return s;
+        L = distance(vControl, info.endPos) / distance(vControl, vOpposite);
+        info.endNormal = lerp(gsin[controlIdx].normal, gsin[oppositeIdx].normal, L);
+
+        return info;
     }
 
-    void legacy_drawSilhouette(SilhouetteInfo s) {
-        // vec3 up = s.endPos - s.startPos;
-        // vec3 look = u_CameraMatrix[3].xyz - s.startPos;
-        // look.y = 0;
-        // look = normalize(look);
-        // up = normalize(up);
-        // vec3 right = cross(up, look);
-        vec3 v[4];
-        vec3 camPos = u_CameraMatrix[3].xyz;
+    void drawInputGeometry() {
+        for (int i = 0; i < 3; i++) {
+            // Convert coordinates to world space for lighting in FS
+            gsout.position = u_ModelMatrix * gsin[i].position;
+            gsout.normal = (u_ModelMatrix * vec4(gsin[i].normal, 0)).xyz;
+            gsout.uv = gsin[i].uv;
+            gsout.color = gsin[i].color;
+            gsout.data1 = gsin[i].data1;
+            
+            // Ensure render mode for this triangle is in geometry
+            gsout.data1.x = MODE_GEOMETRY;
 
-        float startScale = u_SilhouetteScale;
-        float endScale = u_SilhouetteScale;
+            // Edge distance calculation for wireframe rendering
+            gsout.data2 = getOppositeEdgeDistanceVec(i);
 
-        if (u_OutlineViewSpaceScale) {
-            startScale *= distance(s.startPos, camPos) * 0.1;
-            endScale *= distance(s.endPos, camPos) * 0.1;
+            gl_Position = u_MVPMatrix * gsin[i].position;
+            EmitVertex();
         }
 
-        // TODO: ns/ne should NOT be perpendicular to the face normal that we're drawing along.
-        // instead, this should be flush with the view space.
-        v[0] = vec3(s.startPos + startScale * normalize(s.startNormal));
-        v[1] = vec3(s.endPos + endScale * normalize(s.endNormal));
-        v[2] = vec3(s.startPos);
-        v[3] = vec3(s.endPos);
-
-        o.color = vec4(u_OutlineColor, 0);
-
-        // TODO: Set o.worldNormal for silhouette edges
-
-        // Debug out original facing directions before the flip
-        // (red is forward, green is reversed)
-        // if (u_Debug) {
-        //     if (NdotV > 0) {
-        //         o.col = vec4(1, 0, 0, 1);
-        //     } else if (NdotV < 0) {
-        //         o.col = vec4(0, 1, 0, 1);
-        //     }
-        // }
-
-        if (!isBackface(v[0], v[1], v[2])) {
-            for (int i = 0; i < 4; i++) {
-                gl_Position = u_MVPMatrix * vec4(v[i], 1.0);
-                EmitVertex();
-            }
-        } else {
-            // Flip winding order of the quad
-            gl_Position = u_MVPMatrix * vec4(v[1], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[0], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[3], 1.0);
-            EmitVertex();
-            
-            gl_Position = u_MVPMatrix * vec4(v[2], 1.0);
-            EmitVertex();
-        }
-        
         EndPrimitive();
     }
 
@@ -272,20 +306,22 @@ GLSLShader GS
      *
      * @param vec4  v0          Start vertex in world space
      * @param vec4  v1          End vertex in world space
-     * @param vec3  n0          Start vertex's normal in world space
-     * @param vec3  n1          End vertex's normal in world space
      * @param float scale       Uniform thickness scale
      * @param float thickness0  Multiplier scale at the start vertex (0 -> 1)
      * @param float thickness1  Multiplier scale at the end vertex (0 -> 1)
+     * @param vec3  color0
+     * @param vec3  color1
      */
-    void drawEdge(
+    void drawEdgeGeometry(        
         vec4 v0, 
-        vec4 v1, 
+        vec4 v1,
         vec3 n0, 
-        vec3 n1, 
+        vec3 n1,
         float scale, 
         float thickness0, 
-        float thickness1
+        float thickness1,
+        vec3 color0,
+        vec3 color1
     ) {
         vec4 camPos = u_CameraMatrix[3];
         
@@ -359,174 +395,122 @@ GLSLShader GS
         float uvHalfW = (1.0 - uvSegmentLen) * 0.5;
 
         // Z channel is screen space segment length
-        o.uv.z = uvHalfW;
+        gsout.uv.z = uvHalfW;
 
         vec4 aspectCorrect = vec4(aspect, 1, 0, 0);
-
-        // vec4 viewPos = u_ViewMatrix * v0;
-        // float depth = -viewPos.z;
-
-        float zoffset = -u_OutlineOffset;//-halfW0;
+        float zoffset = -u_OutlineOffset;
 
         gl_Position = p0 + (vec4(right, 0, 0) * -halfW0 + vec4(forward, 0, 0) * -halfW0) * aspectCorrect;
-        o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        o.uv.xy = vec2(0, 0);
+        gsout.position = vec4(gl_Position.xy, 0, 1);
+        gsout.uv.xy = vec2(0, 0);
         
         gl_Position.z += zoffset;
-        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
 
         gl_Position = p1 + (vec4(right, 0, 0) * -halfW1 + vec4(forward, 0, 0) * halfW1) * aspectCorrect;
-        o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        o.uv.xy = vec2(1, 0);
+        gsout.position = vec4(gl_Position.xy, 0, 1);
+        gsout.uv.xy = vec2(1, 0);
         
         gl_Position.z += zoffset;
-        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
 
         gl_Position = p0 + (vec4(right, 0, 0) * halfW0 + vec4(forward, 0, 0) * -halfW0) * aspectCorrect;
-        o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        o.uv.xy = vec2(0, 1);
+        gsout.position = vec4(gl_Position.xy, 0, 1);
+        gsout.uv.xy = vec2(0, 1);
         
         gl_Position.z += zoffset;
-        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
         
         gl_Position = p1 + (vec4(right, 0, 0) * halfW1 + vec4(forward, 0, 0) * halfW1) * aspectCorrect;
-        o.worldPosition = vec4(gl_Position.xy, 0, 1);
-        o.uv.xy = vec2(1, 1);
+        gsout.position = vec4(gl_Position.xy, 0, 1);
+        gsout.uv.xy = vec2(1, 1);
         
         gl_Position.z += zoffset;
-        o.dist = vec4(0,0,0, gl_Position.z);
         EmitVertex();
 
         EndPrimitive();
     }
 
     /**
-     * Calculate distance between a vertex and its opposite edge
-     *
-     * See: Bærentzen, J. A., Munk-Lund, S., Gjøl, M., & Larsen, B. D. (2008). 
-     * Two Methods for Antialiased Wireframe Drawing with Hidden Line Removal. 
-     * http://orbit.dtu.dk/files/3735323/wire-sccg.pdf
-     *
-     * @param int idx Vertex index in the GS input
-     * 
-     * @return vec3
+     * Evaluate start and end coordinates of a silhouette edge
+     * contained within the triangle and draw line geometry 
      */
-    vec3 getOppositeEdgeDistanceVec(int idx) {
-        int nextIdx = (idx + 1) % 3;
-        int nextIdx2 = (nextIdx + 1) % 3;
+    void drawSilhouette() {
+        float NdotV[3];
+        vec3 worldPos;
 
-        // Vertex to edge distance calculations for wireframe rendering
-        // as part of our fragment coloring (instead of a separate technique)
-        vec4 v0 = u_ViewProjMatrix * gsin[idx].worldPosition;
-        vec4 v1 = u_ViewProjMatrix * gsin[nextIdx].worldPosition;
-        vec4 v2 = u_ViewProjMatrix * gsin[nextIdx2].worldPosition;
+        // Calculate NdotV's of each vertex
+        for (int i = 0; i < 3; i++) {
+            worldPos = (u_ModelMatrix * gsin[i].position).xyz;
+            NdotV[i] = dot(
+                (u_ModelMatrix * vec4(gsin[i].normal, 0)).xyz,
+                u_CameraMatrix[3].xyz - worldPos
+            );
+        }
 
-        float d = distanceToLine(v0.xyz, v1.xyz, v2.xyz);
+        int controlIdx = getSilhouetteControlIndex(NdotV);
+        if (controlIdx >= 0) {
+            SilhouetteInfo info = getSilhouetteInfo(controlIdx, NdotV);
 
-        if (idx == 0) {
-            return vec3(d, 0, 0);
-        } else if (idx == 2) {
-            return vec3(0, d, 0);
-        } else {
-            return vec3(0, 0, d);
+            gsout.data1.x = MODE_SILHOUETTE;
+
+            // TODO: Color *could* be interpolated between the two
+            // edges - but it isn't a priority.
+            vec3 color = gsin[controlIdx].color.rgb;
+
+            drawEdgeGeometry(
+                u_ModelMatrix * vec4(info.startPos, 1),
+                u_ModelMatrix * vec4(info.endPos, 1),
+                info.startNormal,
+                info.endNormal,
+                u_SilhouetteScale,
+                1.0,
+                1.0,
+                color,
+                color
+            );
+        } 
+    }
+
+    /**
+     * Iterate through edges of the triangle and add geometry where
+     * crease information is matched between two adjacent vertices
+     */
+    void drawCreases() {
+        int next;
+
+        for (int i = 0; i < 3; i++) {
+            next = (i + 1) % 3;
+
+            // If there's a valid crease edge between two vertices,
+            // render new geometry representing that crease
+            if (gsin[i].data1.x <= MODE_CREASE_3 + EPSILON &&
+                gsin[next].data1.x <= MODE_CREASE_3 + EPSILON
+            ) {
+                gsout.data1.x = gsin[i].data1.x;
+                drawEdgeGeometry(
+                    u_ModelMatrix * gsin[i].position,
+                    u_ModelMatrix * gsin[next].position,
+                    gsin[i].normal,
+                    gsin[next].normal,
+                    u_CreaseScale,
+                    gsin[i].color.a,
+                    gsin[next].color.a,
+                    gsin[i].color.rgb,
+                    gsin[next].color.rgb
+                );
+            }
         }
     }
 
     /**
-     * Determine if there is a valid crease line between the two input vertices.
-     * 
-     * Crease information is decoded from the vertex color's alpha channel.
-     * Vertex IDs are used to ensure that two neighboring vertices do not 
-     * attempt to render the same geometry twice (as one will always be 
-     * incrementing while the other decrements, assuming same winding order).
-     *
-     * @param int idx Index of crease start vertex in GS inputs
-     * @param int nextIdx Index of crease end vertex in GS inputs
-     * @param int lod Current LOD to check against (0->2)
-     *
-     * @return boolean
+     * Determine if the triangle is interior to an original
+     * silhouette triangle prior to tessellation
      */
-    bool isValidCrease(CreaseInfo info, CreaseInfo nextInfo, int lod) {
-        // Increasing vertex IDs, both at *least* the 
-        // input LOD, *and* one of them is an exact 
-        // crease vertex
-        if (!info.valid || !nextInfo.valid) {
-            return false;
-        }
-
-        return (info.id < nextInfo.id) &&
-            (info.lod >= lod && nextInfo.lod >= lod) &&
-            (info.bump == false || nextInfo.bump == false);
-    }
-
-    /**
-     * Draw the base triangle input
-     */
-    void drawInputGeometry() {
-        for (int idx = 0; idx < 3; idx++) {
-            // Color without the type encoding
-            // TODO: RGB here has no usage, since we're using
-            // a uniform for color data. Reuse for something?
-            o.color = vec4(gsin[idx].color.rgb, 0);
-            o.worldNormal = (u_ModelMatrix * vec4(gsin[idx].normal, 0)).xyz;
-            o.worldPosition = gsin[idx].worldPosition;
-            o.uv = gsin[idx].uv;
-
-            // slight inset
-            // o.worldPosition.xyz -= normalize(gsin[idx].normal) * u_SurfaceInsetScale;
-
-            // vec4 viewPos = u_ViewMatrix * o.worldPosition;
-            // float depth = -viewPos.z;
-
-            // o.color = vec4(vec3(depth), 0);
-            gl_Position = u_ViewProjMatrix * o.worldPosition;
-            // gl_Position.z = depth;
-            
-            // Calculate opposite edge distance per vertex for wireframing
-            o.dist = vec4(getOppositeEdgeDistanceVec(idx), gl_Position.z);
-            // TODO: throwing z as a rider to test render :^)
-            EmitVertex();
-        }
-
-        EndPrimitive();
-    }
-
-    /**
-     * Render some extra lines around the mesh (such as BBox)
-     */
-    void drawDebugGeometry() {
-
-        // u_AABB
-
-        // o.color = vec4(1, 0, 0, 0);
-        // drawEdge(
-        //     u_ModelMatrix * vec4(0, 0, 0, 1), 
-        //     u_ModelMatrix * vec4(4, 0, 0, 1), 
-        //     vec3(1, 0, 0),
-        //     vec3(1, 0, 0),
-        //     u_CreaseScale,
-        //     1.0, 1.0
-        // );
-    }
-
-    /**
-     * Retrieve LOD of the current model
-     */
-    int getLOD() {
-        vec4 origin = u_ModelMatrix * vec4(0, 0, 0, 1);
-        float d = distance(u_CameraMatrix[3], origin);
-
-        int lod = 0;
-        if (d > u_LOD2Distance) {
-            lod = 2;
-        } else if (d > u_LOD1Distance) {
-            lod = 1;
-        }
-
-        return lod;
+    bool isPotentialSilhouette() {
+        return  cmp(gsin[0].data1.y, MODE_SILHOUETTE) &&
+                cmp(gsin[1].data1.y, MODE_SILHOUETTE) &&
+                cmp(gsin[2].data1.y, MODE_SILHOUETTE);
     }
 
     void main() {
@@ -534,88 +518,15 @@ GLSLShader GS
             drawInputGeometry();
         }
 
-        // Really lazy draw-once watch. Actually pretty bad. :)
-        if (gsin[0].id == 0) {
-            drawDebugGeometry();
+        if (u_SilhouetteDrawMode > 0 && isPotentialSilhouette()) {
+            drawSilhouette();
         }
 
-        // Don't calculate creases if we're a backface triangle
-        if (u_CullBackfaceCreases && 
-            isBackface(
-                gsin[0].worldPosition.xyz, 
-                gsin[1].worldPosition.xyz,
-                gsin[2].worldPosition.xyz
-            )
-        ) {
-            return;
-        }
-
-        if (u_SilhouetteDrawMode > 0 && u_SilhouetteScale > EPSILON) {
-            SilhouetteInfo s = getSilhouetteInfo();
-            if (s.valid) {
-                // drawSilhouette(s);
-
-                // Copy color forward to silhouette geometry.
-                // And set alpha to 1.0 for detection in the PS
-                o.color = gsin[0].color;
-                o.color.a = 1.0;
-
-                // TODO: Interpolate thickness at each end based
-                // on the thickness value of adjacent vertices
-                // (should be done within getSilhouetteInfo)
-                drawEdge(
-                    u_ModelMatrix * vec4(s.startPos, 1), 
-                    u_ModelMatrix * vec4(s.endPos, 1), 
-                    s.startNormal,
-                    s.endNormal,
-                    u_SilhouetteScale,
-                    1.0,
-                    1.0
-                );
-            }
-        }
-
-        if (u_CreaseDrawMode < 1 || u_CreaseScale < EPSILON) {
-            return;
-        }
-
-        // If the entire triangle is marked with crease edges, ignore entirely.
-        // It's at a junction we can't resolve.
-        // if (gsin[0].color.a == gsin[2].color.a && gsin[0].color.a == gsin[4].color.a) {
-        //     return;
-        // }
-        
-        int lod = getLOD();
-
-        // For every crease edge, draw a billboarded prismoid
-        for (int idx = 0; idx < 3; idx++) {
-            int nextIdx = (idx + 1) % 3;
-
-            // Copy forward to all crease geometry
-            o.color = gsin[idx].color;
-
-            // Extract crease information at each vertex
-            CreaseInfo info = extractCreaseInfo(gsin[idx].color.a);
-            info.id = gsin[idx].id;
-
-            CreaseInfo nextInfo = extractCreaseInfo(gsin[nextIdx].color.a);
-            nextInfo.id = gsin[nextIdx].id;
-
-            if (isValidCrease(info, nextInfo, lod)) {
-                drawEdge(
-                    gsin[idx].worldPosition, 
-                    gsin[nextIdx].worldPosition,
-                    gsin[idx].normal, 
-                    gsin[nextIdx].normal,
-                    u_CreaseScale,
-                    info.thickness, 
-                    nextInfo.thickness
-                );
-            }
+        if (u_CreaseDrawMode > 0) {
+            drawCreases();
         }
     }
 }
-
 
 GLSLShader PS
 {
@@ -637,8 +548,8 @@ GLSLShader PS
         PSEdgeInfo o;
         
         // Extract UV coordinates and edge half width
-        vec2 uv = i.uv.xy;
-        float uvHalfW = i.uv.z;
+        vec2 uv = psin.uv.xy;
+        float uvHalfW = psin.uv.z;
         uv.y *= uvHalfW * 2;
 
         // Generate a screen-space capsule by discarding fragments
@@ -647,19 +558,9 @@ GLSLShader PS
         vec2 end = vec2(1.0 - uvHalfW, uvHalfW);
 
         o.halfWidth = uvHalfW;
-        o.segmentDistance = distanceToSegment(uv, start, end); 
-        o.silhouette = i.color.a > 0.99;
+        o.segmentDistance = distanceToSegment(uv, start, end);
+        o.silhouette = cmp(psin.data1.x, MODE_SILHOUETTE);
         return o;
-    }
-
-    vec3 edgeLODToColor(float lod) {
-        if (i.color.a >= 0.299) { // LOD2
-            return vec3(0.01);
-        } else if (i.color.a >= 0.199) { // LOD1
-            return vec3(0.25);
-        } else { // LOD0
-            return vec3(1);
-        }
     }
 
     /**
@@ -670,24 +571,22 @@ GLSLShader PS
 
         if (info.silhouette) {
             if (u_SilhouetteDrawMode == SILHOUETTE_DRAW_UVS) {
-                color = vec3(i.uv.x, 0, i.uv.y);
+                color = vec3(psin.uv.x, 0, psin.uv.y);
             } else if (u_SilhouetteDrawMode == SILHOUETTE_DRAW_COLOR) {
                 color = u_OutlineColor;
                 
                 if (u_UseVertexColors) {
-                    color *= i.color.rgb;
+                    color *= psin.color.rgb;
                 }
             }
         } else {
             if (u_CreaseDrawMode == CREASE_DRAW_UVS) {
-                color = vec3(i.uv.x, 0, i.uv.y);
-            } else if (u_CreaseDrawMode == CREASE_DRAW_LOD) {
-                color = edgeLODToColor(i.color.a);
+                color = vec3(psin.uv.x, 0, psin.uv.y);
             } else if (u_CreaseDrawMode == CREASE_DRAW_COLOR) {
                 color = u_OutlineColor;
 
                 if (u_UseVertexColors) {
-                    color *= i.color.rgb;
+                    color *= psin.color.rgb;
                 }
             }
         }
@@ -904,7 +803,7 @@ GLSLShader PS
         vec3 color;
 
         // Calculate lighting
-        vec3 eyeDir = normalize(u_CameraMatrix[3].xyz - i.worldPosition.xyz);
+        vec3 eyeDir = normalize(u_CameraMatrix[3].xyz - psin.position.xyz);
 
         float light = 0.5;
         
@@ -920,8 +819,8 @@ GLSLShader PS
                 light0ConeAngle,
                 light0FallOff,
                 light0ViewProj,
-                i.worldPosition,
-                i.worldNormal,
+                psin.position,
+                psin.normal,
                 eyeDir
             );
         } 
@@ -942,9 +841,9 @@ GLSLShader PS
 
                 // light 0 is shaded, light 0.5 is diffuse lit, 1 is highlight
                 if (light > 0.5) {
-                    color = lerp(i.color.xyz, i.color.xyz / u_Specular, (light - 0.5) * 2.0);
+                    color = lerp(psin.color.xyz, psin.color.xyz / u_Specular, (light - 0.5) * 2.0);
                 } else {
-                    color = lerp(i.color.xyz * u_Shaded, i.color.xyz, light * 2.0);
+                    color = lerp(psin.color.xyz * u_Shaded, psin.color.xyz, light * 2.0);
                 }
             } else {
                 // Fixed diffuse + shade + specular color palette, lerp between
@@ -961,21 +860,24 @@ GLSLShader PS
         // color and our actual output color based on how close the
         // fragment is to a triangle edge
         if (u_GeometryDrawMode == GEOMETRY_DRAW_WIREFRAME) {
-            float d = min(i.dist.x, min(i.dist.y, i.dist.z)) * 2.0;
+            float d = min(psin.data2.x, min(psin.data2.y, psin.data2.z)) * 2.0;
             // float intensity = exp2(-2.0 * d * d);
             d = smoothstep(0.025, 0.05, d);
 
             // draw the main color, but fade vertex edges on top of it
             // TODO: Distance based
-            color = lerp(color, d * color, 0.1);
+            color = lerp(color, d * color, 0.5);
         }
 
         return color;
     }
 
     void main() {
-        // If alpha channel is nonzero, we're flagged as edge geometry
-        if (i.color.a >= 0.01) {
+        float mode = psin.data1.x;
+
+        if (cmp(mode, MODE_GEOMETRY)) {
+            color = vec4(getGeometryColor(), 1);
+        } else {
             PSEdgeInfo info = getPSEdgeInfo();
 
             // Generate a screen space capsule by discarding fragments
@@ -984,58 +886,15 @@ GLSLShader PS
                 discard;
             }
 
-            color = vec4(getEdgeColor(info), u_EdgeOpacity);
-        } else {
-            color = vec4(getGeometryColor(), 1.0);
+            color = vec4(getEdgeColor(info), 1);
         }
-    }
-}
-
-attribute shadowdata {
-    vec4 worldPosition : POSITION;
-};
-
-GLSLShader ShadowVS
-{
-    void main() {
-        o.worldPosition = u_ModelMatrix * vec4(position, 1);
-        gl_Position = u_ViewProjMatrix * o.worldPosition;
-    }
-}
-
-/**
- * Shadow fragment shader from the perspective of attached light(s)
- *
- * Operates solely on the original geometry, as edges don't matter here.
- */ 
-GLSLShader ShadowPS
-{
-    /**
-     * Via Autodesk's Uber Shader
-     */
-    float getShadowDepth(vec4 worldPos, mat4 shadowProjMatrix) {
-        vec4 mul = shadowProjMatrix * worldPos;
-        float depthPerPixel = mul.z / mul.w;
-        return (depthPerPixel + fwidth(depthPerPixel)) * 0.5 + 0.5;
-    }
-
-    void main() {
-        if (!u_CastsShadows) {
-            discard;
-        }
-
-        // Dotted shadow, for verifying we're actually running
-        // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
-        float depth = getShadowDepth(psin.worldPosition, u_ViewProjMatrix);
-        color = vec4(depth, depth, depth, 1);
     }
 }
 
 technique Main
 <
-    // string Transparency = "Opaque";
-    // string Transparency = "Transparent";
-    string index_buffer_type = "GLSL_TRI";
+    string Transparency = "Opaque";
+    string index_buffer_type = "GLSL_PNAEN9";
 >
 {
 	pass p0
@@ -1043,19 +902,10 @@ technique Main
         string drawContext = "colorPass";
     >
 	{
-		VertexShader (in appdata, out vs_to_gs o) = VS;
-		GeometryShader (in vs_to_gs gsin, out gs_to_ps o) = { Utility, GS };
-		PixelShader (in gs_to_ps i, out ps_out) = { Utility, PS };
-	}
-    
-    // Shadow cast pass. Not working for some reason - probably b/c of missing GS.
-    // Skipping for now since it just mimics Maya's shadow casting anyway.
-    pass p1
-    <
-        string drawContext = "shadowPass";
-    >
-    {
-		VertexShader (in appdata, out shadowdata o) = ShadowVS;
-		PixelShader (in shadowdata psin, out ps_out) = ShadowPS;
+        VertexShader (in appdata, out shaderdata vsout) = VS;
+        TessControlShader (in shaderdata tcsin, out shaderdata tcsout) = { Utility, TCS };
+        TessEvaluationShader (in shaderdata tesin, out shaderdata tesout) = { Utility, TES };
+        GeometryShader (in shaderdata gsin, out shaderdata gsout) = { Utility, GS };
+        PixelShader (in shaderdata psin, out ps_out) = PS;
     }
 }

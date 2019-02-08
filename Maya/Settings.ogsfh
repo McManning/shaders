@@ -159,6 +159,24 @@ uniform bool u_CastsShadows
 //     string UIGroup = "Debug";
 // > = false;
 
+uniform int u_TessInner
+<
+	string UIName = "Tessellation Inner";
+	string UIGroup = "Debug";
+> = 5;
+
+uniform int u_TessOuter
+<
+	string UIName = "Tessellation Outer";
+	string UIGroup = "Debug";
+> = 5;
+
+uniform float u_TessShapeFactor
+<
+	string UIName = "Tessellation Factor";
+	string UIGroup = "Debug";
+> = 0.5;
+
 // TODO: Move this. Is actually being used for calculations now
 uniform float u_SurfaceInsetScale
 <
