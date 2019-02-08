@@ -20,11 +20,11 @@ uniform float u_LOD2Distance
 	string UIName = "LOD2 Distance";
 > = 20.0;
 
-uniform vec3 u_AABB
-<
-	string UIGroup = "LOD";
-	string UIName = "AABB";
-> = { 1, 1, 1 };
+// uniform vec3 u_AABB
+// <
+// 	string UIGroup = "LOD";
+// 	string UIName = "AABB";
+// > = { 1, 1, 1 };
 
 // TODO: Disable silhouette on LOD2?
 

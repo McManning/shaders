@@ -619,7 +619,7 @@ GLSLShader GS
 
 GLSLShader PS
 {
-    struct EdgeInfo {
+    struct PSEdgeInfo {
         // Distance between the fragment and the edge's line segment
         float segmentDistance;
 
@@ -633,8 +633,8 @@ GLSLShader PS
     /**
      * If the fragment is part of edge geometry, extract useful info for rendering
      */
-    EdgeInfo getEdgeInfo() {
-        EdgeInfo o;
+    PSEdgeInfo getPSEdgeInfo() {
+        PSEdgeInfo o;
         
         // Extract UV coordinates and edge half width
         vec2 uv = i.uv.xy;
@@ -665,7 +665,7 @@ GLSLShader PS
     /**
      * Determine final color of edge geometry, taking in account draw mode and edge type.
      */
-    vec3 getEdgeColor(EdgeInfo info) {
+    vec3 getEdgeColor(PSEdgeInfo info) {
         vec3 color;
 
         if (info.silhouette) {
@@ -976,7 +976,7 @@ GLSLShader PS
     void main() {
         // If alpha channel is nonzero, we're flagged as edge geometry
         if (i.color.a >= 0.01) {
-            EdgeInfo info = getEdgeInfo();
+            PSEdgeInfo info = getPSEdgeInfo();
 
             // Generate a screen space capsule by discarding fragments
             // that are too far from the edge's line segment

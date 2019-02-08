@@ -38,6 +38,13 @@ GLSLShader Utility
         return color;
     }
     
+    /**
+     * Project a point onto a plane given a position and a normal
+     */
+    vec3 projectOntoPlane(vec3 point, vec3 planePoint, vec3 planeNormal) {
+        return point - dot(point - planePoint, planeNormal) * planeNormal;
+    }
+
     float distanceToSegment(vec2 point, vec2 a, vec2 b) {
         float dist = length(a - b);
         vec2 v = normalize(b - a);
@@ -56,6 +63,12 @@ GLSLShader Utility
         }
 
         return length(point - segmentPoint);
+    }
+
+    float distanceToLine(vec3 point, vec3 a, vec3 b)
+    {
+        // TODO: Consolidate with distanceToSegment?
+        return length(cross(point - a, point - b)) / length(b - a);
     }
 
     /**
@@ -114,5 +127,102 @@ GLSLShader Utility
         }
         
         return info;
+    }
+
+    
+    /**
+     * Retrieve the current LOD level the model should be rendered under
+     *
+     * @return int [0, 2]
+     */
+    int getCurrentLOD() {
+        return 0;
+    }
+
+    struct EdgeInfo {
+        bool valid;
+        int id;
+        int lod;
+        int mode;
+        bool bump;
+        float thickness;
+    };
+
+    /**
+     * Unpack structured edge information and check for validity
+     *
+     * @param int vertexId used to check winding order in isValidEdge()
+     */
+    EdgeInfo unpackEdgeInfo(float a, int id) {
+        EdgeInfo info;
+        info.id = id;
+
+        // Early exit if there's no alpha value 
+        info.valid = a > EPSILON && damm(int(floor(a * 10000)));
+
+        if (info.valid) {
+            int x = int(floor(a * 1000));
+
+            info.lod = (x & 768) / 256;
+            info.mode = (x & 192) / 64;
+            info.bump = (x & 32) > 30;
+            info.thickness = (x & 31) / 31.0;
+        }
+        
+        return info;
+    }
+    
+    /**
+     * Determine if there's a renderable edge connecting the two inputs.
+     * 
+     * Vertex IDs are used to ensure that two neighboring vertices do not 
+     * attempt to render the same geometry twice (as one will always be 
+     * incrementing while the other decrements, assuming same winding order).
+     *
+     * @return boolean
+     */
+    bool isValidEdge(EdgeInfo start, EdgeInfo end) {
+        // Increasing vertex IDs, both at *least* the 
+        // input LOD, *and* one of them is an exact 
+        // crease vertex
+        if (!start.valid || !end.valid) {
+            return false;
+        }
+
+        int lod = getCurrentLOD();
+
+        return (start.id < end.id) &&
+            (start.lod >= lod && end.lod >= lod) &&
+            (start.bump == false || end.bump == false);
+    }
+
+    /**
+     * Determine which index, 0-2, connects both edges on a silhouette.
+     * This happens to be the vertex that has a normal pointing in the
+     * opposite direction of the other two vertices, if directions were
+     * split in terms of the camera plane.
+     *
+     * @return int [0, 2]
+     */
+    int getSilhouetteControlIndex(float NdotV[3]) {
+        int i;
+        float s[3];
+
+        for (i = 0; i < 3; i++) {
+            s[i] = sign(NdotV[i] + 0.0001);
+        }
+
+        for (i = 0; i < 3; i++) {
+            if (s[i] != s[(i + 1) % 3] && s[i] != s[(i + 2) % 3]) {
+                return i;
+            }
+        }
+
+        // None of the above? Invalid.
+        return -1;
+    }
+
+    bool cmp(float a, float b) {
+        return abs(a - b) < EPSILON;
     }
 }
