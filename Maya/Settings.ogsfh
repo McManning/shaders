@@ -4,6 +4,9 @@
 #ifndef _SETTINGS_OGSFH_
 #define _SETTINGS_OGSFH_
 
+// Whether or not to use the shadowcasting shaders in Shadows.ogsfh
+#define USE_CUSTOM_SHADOWS 1
+
 // ---------------------------------------------
 // LOD Settings
 // ---------------------------------------------

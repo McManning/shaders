@@ -3,6 +3,10 @@
 #include "Utility.ogsfh"
 #include "Settings.ogsfh"
 
+#ifdef USE_CUSTOM_SHADOWS
+    #include "Shadows.ogsfh"
+#endif
+
 // Mode constants
 #define MODE_CREASE_0 0.0
 #define MODE_CREASE_1 0.1
@@ -150,7 +154,6 @@ GLSLShader TES
         tesout.color = tesin[0].color * U + tesin[1].color * V + tesin[2].color * W;
         tesout.data1 = tesin[0].data1 * U + tesin[1].data1 * V + tesin[2].data1 * W;
 
-        // Just copy forward for flat tessellation
         vec3 position = tesin[0].position.xyz * U +
                         tesin[1].position.xyz * V +
                         tesin[2].position.xyz * W;
@@ -908,4 +911,18 @@ technique Main
         GeometryShader (in shaderdata gsin, out shaderdata gsout) = { Utility, GS };
         PixelShader (in shaderdata psin, out ps_out) = PS;
     }
+    
+#ifdef USE_CUSTOM_SHADOWS
+    // Custom shadow pass that accounts for tessellation
+    pass p1
+    <
+        string drawContext = "shadowPass";
+    >
+    {
+		VertexShader (in appdata, out shadowdata o) = ShadowVS;
+        TessControlShader (in shadowdata tcsin, out shadowdata tcsout) = ShadowTCS;
+        TessEvaluationShader (in shadowdata tesin, out shadowdata tesout) = ShadowTES;
+		PixelShader (in shadowdata psin, out ps_out) = ShadowPS;
+    }
+#endif
 }

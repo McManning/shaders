@@ -1,0 +1,92 @@
+/**
+ * Shadowcasting with tessellation.
+ *
+ * Edges are ignored for shadowcasting, and only the original (tessellated) geometry is used.
+ */
+
+attribute shadowdata {
+    vec4 position : POSITION;
+    vec3 normal : NORMAL;
+};
+
+GLSLShader ShadowVS
+{
+    void main() {
+        o.position = u_ModelMatrix * position;
+        o.normal = normal;
+    }
+}
+
+patchsize 3;
+GLSLShader ShadowTCS
+{
+    void main() {
+        tcsout[gl_InvocationID].position = tcsin[gl_InvocationID].position;
+        tcsout[gl_InvocationID].normal = tcsin[gl_InvocationID].normal;
+
+        if (gl_InvocationID == 1) {
+            // No shadowcasting? Stop the pipeline before wasting time tessellating
+            if (!u_CastsShadows) {
+                gl_TessLevelOuter[0] = 0;
+                gl_TessLevelOuter[1] = 0;
+                gl_TessLevelOuter[2] = 0;
+
+                gl_TessLevelInner[0] = 0;
+            } else {
+                gl_TessLevelOuter[0] = u_TessOuter;
+                gl_TessLevelOuter[1] = u_TessOuter;
+                gl_TessLevelOuter[2] = u_TessOuter;
+
+                gl_TessLevelInner[0] = u_TessInner;
+            }
+        }
+    }
+}
+
+tesparams(triangles, equal_spacing, ccw);
+GLSLShader ShadowTES
+{
+    void main() {
+        float U = gl_TessCoord.x;
+        float V = gl_TessCoord.y;
+        float W = gl_TessCoord.z;
+
+        tesout.normal = tesin[0].normal * U + tesin[1].normal * V + tesin[2].normal * W;
+        
+        vec3 position = tesin[0].position.xyz * U +
+                        tesin[1].position.xyz * V +
+                        tesin[2].position.xyz * W;
+
+        // Projection of the vertex into a tangent plane for each dominant vertex
+        vec3 pU = projectOntoPlane(position, tesin[0].position.xyz, tesin[0].normal.xyz);
+        vec3 pV = projectOntoPlane(position, tesin[1].position.xyz, tesin[1].normal.xyz);
+        vec3 pW = projectOntoPlane(position, tesin[2].position.xyz, tesin[2].normal.xyz);
+
+        // Compute barycentric interpolation of each projection
+        vec3 phongTess = U * pU + V * pV + W * pW;
+
+        // Set position as an interpolation between linear and phong tessellation
+        tesout.position = vec4(lerp(position, phongTess, u_TessShapeFactor), 1);
+
+        gl_Position = u_ViewProjMatrix * tesout.position;
+    }
+}
+
+GLSLShader ShadowPS
+{
+    /**
+     * Via Autodesk's Uber Shader
+     */
+    float getShadowDepth(vec4 worldPos, mat4 shadowProjMatrix) {
+        vec4 mul = shadowProjMatrix * worldPos;
+        float depthPerPixel = mul.z / mul.w;
+        return (depthPerPixel + fwidth(depthPerPixel)) * 0.5 + 0.5;
+    }
+
+    void main() {
+        // Dotted shadow, for verifying we're actually running
+        // if (int(gl_FragCoord.x) % 2 > 0 && int(gl_FragCoord.y) % 2 > 0) discard;
+        float depth = getShadowDepth(psin.position, u_ViewProjMatrix);
+        color = vec4(depth, depth, depth, 1);
+    }
+}
