@@ -11,6 +11,14 @@ import math
 TITLE = "NPR Shader Tools"
 VERSION = "0.2"
 
+# Up/forward may swap depending on what workspace we're in (UE4 vs Maya)
+RIGHT = 0 # X
+UP = 1 # Y
+FORWARD = 2 # Z
+
+# Shader vec3 uniform to store BBox calculations
+BOUNDING_BOX_UNIFORM = 'u_BoundingBox'
+
 ABOUT_MESSAGE = """
 {}
 
@@ -50,6 +58,78 @@ def damm(val):
         interim = matrix[interim][int(c)]
 
     return interim
+
+def getAverageBoundingBox(shapes):
+    pass
+
+def getMaxBoundingBox(shapes):
+    """Return max bbox extents for all the input shapes
+
+        :shapes string[] DAG object list
+
+        :return Tuple (x, y, z)
+    """
+    # Calculate maximum BBox extents from all the connected shapes
+    shape = shapes.pop()
+    bboxMin = cmds.getAttr(shape + '.boundingBoxMin')[0]
+    bboxMax = cmds.getAttr(shape + '.boundingBoxMax')[0]
+
+    width = bboxMax[RIGHT] - bboxMin[RIGHT]
+    height = bboxMax[UP] - bboxMin[UP]
+    depth = bboxMax[FORWARD] - bboxMin[FORWARD]
+
+    for shape in shapes:
+        bboxMin = cmds.getAttr(shape + '.boundingBoxMin')[0]
+        bboxMax = cmds.getAttr(shape + '.boundingBoxMax')[0]
+
+        # Maximum extents
+        width = max(width, bboxMax[RIGHT] - bboxMin[RIGHT])
+        height = max(height, bboxMax[UP] - bboxMin[UP])
+        depth = max(depth, bboxMax[FORWARD] - bboxMin[FORWARD])
+
+    return (width, height, depth)
+
+def updateShaderAggregateBoundingBox(aggregate_callable):
+    """Update the u_BoundingBox uniform for all shaders attached
+        to the selected object to the aggregate bounding box of 
+        all shapes attached to each of those shaders. 
+
+        This gets a bit convoluted when dealing with multiple 
+        materials attached to each object and a shared BBox, but
+        in production BBox will be a uniform provided per-instance
+        rather than this aggregation. So this is more of an estimate
+        and works best in one-material-per-object development environments.
+
+        :aggregate_callable method to find a bounding box for a set of shapes.
+            Different algorithms can swapped here (max vs average)
+    """
+
+    paths = cmds.listRelatives(fullPath=True, shapes=True, noIntermediate=True)
+
+    # Update all attached shaders with the new extents
+    for path in paths:
+        engines = cmds.listConnections(path, type='shadingEngine')
+        
+        # Remove dupes
+        engines = list(set(engines))
+
+        for engine in engines:
+            # Grab materials on that engine
+            # Could also do listConnections(type='GLSLShader') but I may
+            # port it in the future... so we wrap with ls() instead.
+            materials = cmds.ls(cmds.listConnections(engine), mat=True)
+            materials = list(set(materials))
+        
+            # Grab all shapes connected to that engine
+            shapes = cmds.listConnections(engine, type='shape')
+
+            bbox = aggregate_callable(shapes)
+
+            # Update materials with new bounding boxe
+            for material in materials:
+                cmds.setAttr(material + '.' + BOUNDING_BOX_UNIFORM + 'X', bbox[0])
+                cmds.setAttr(material + '.' + BOUNDING_BOX_UNIFORM + 'Y', bbox[1])
+                cmds.setAttr(material + '.' + BOUNDING_BOX_UNIFORM + 'Z', bbox[2])
 
 def about(window):
     """Prompt with an about dialog"""
@@ -367,9 +447,24 @@ def testA():
 def addMenuBar(window):
     """Add dropdown menu bar"""
     cmds.menuBarLayout()
-    cmds.menu(label="File")
+    # cmds.menu(label="File")
+    # cmds.menu(label="Display")
+    # cmds.menuItem(label="")
+
     cmds.menu(label="Help", helpMenu=True)
-    cmds.menuItem(label='About', command="about(\"" + window + "\")")
+    cmds.menuItem(label="About", command="about(\"" + window + "\")")
+    cmds.setParent("..")
+
+    
+
+def addDrawModes(window):
+    """Global draw overrides. Shortcut so we don't have to access shader settings per-instance"""
+    cmds.rowLayout(numberOfColumns=5)
+    cmds.button(label="Wireframe", command="drawMode(0)")
+    cmds.button(label="Modeling", command="drawMode(1)")
+    cmds.button(label="Silhouette", command="drawMode(2)")
+    cmds.button(label="Unlit", command="drawMode(3)")
+    cmds.button(label="Lookdev", command="drawMode(4)")
     cmds.setParent("..")
 
 def addCreaseGroup(window):
@@ -409,13 +504,17 @@ def addCreaseGroup(window):
 def addMiscGroup(window):
     """Misc relevant tools"""
     cmds.frameLayout(label="Misc Tools")
-    cmds.rowLayout(numberOfColumns=5)
+    cmds.rowColumnLayout(numberOfColumns=5)
 
     cmds.button(label="Soften all edges", command="softenModel()")
     cmds.button(label="Delete History", command="cmds.DeleteHistory()")
     cmds.button(label="Bump Crease", command="bumpCrease()")
     cmds.button(label="Reset Mesh", command="resetMesh()")
     cmds.button(label="Test A", command="testA()")
+    cmds.button(
+        label="Update BBox (MAX)", 
+        command="updateShaderAggregateBoundingBox(getMaxBoundingBox)"
+    )
 
     cmds.setParent("..")
     cmds.setParent("..")
@@ -434,6 +533,7 @@ def openEditor():
     cmds.columnLayout(adjustableColumn=True)
 
     addMenuBar(window)
+    addDrawModes(window)
     addCreaseGroup(window)
     # cmds.separator(height=10, style="none")
     addMiscGroup(window)
