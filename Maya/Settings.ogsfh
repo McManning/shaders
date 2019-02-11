@@ -11,17 +11,24 @@
 // LOD Settings
 // ---------------------------------------------
 
-uniform float u_LOD1Distance
+uniform vec3 u_BoundingBox
 <
-	string UIGroup = "LOD";
-	string UIName = "LOD1 Distance";
-> = 10.0;
+    string UIGroup = "LOD";
+    string UIName = "Bounding Box";
+> = {1.0, 1.0, 1.0};
 
-uniform float u_LOD2Distance
+// Default to LOD1 @ 66% of screen, LOD2 @ 33%
+uniform float u_LOD1
 <
 	string UIGroup = "LOD";
-	string UIName = "LOD2 Distance";
-> = 20.0;
+	string UIName = "LOD1";
+> = 0.667;
+
+uniform float u_LOD2
+<
+	string UIGroup = "LOD";
+	string UIName = "LOD2";
+> = 0.333;
 
 // uniform vec3 u_AABB
 // <
@@ -166,13 +173,19 @@ uniform int u_TessInner
 <
 	string UIName = "Tessellation Inner";
 	string UIGroup = "Debug";
-> = 5;
+	float UIMin = 1;
+	float UIMax = 10;
+	float UIStep = 1;
+> = 1;
 
 uniform int u_TessOuter
 <
 	string UIName = "Tessellation Outer";
 	string UIGroup = "Debug";
-> = 5;
+	float UIMin = 1;
+	float UIMax = 10;
+	float UIStep = 1;
+> = 1;
 
 uniform float u_TessShapeFactor
 <
@@ -187,6 +200,13 @@ uniform float u_SurfaceInsetScale
 	string UIGroup = "Debug";
 > = 0.137;
 
+uniform bool u_DrawBoundingBox
+<
+	string UIName = "Draw Bounding Box";
+	string UIGroup = "Debug";
+> = false;
+
+#define GEOMETRY_DRAW_NONE 0
 #define GEOMETRY_DRAW_COLOR 1
 #define GEOMETRY_DRAW_WIREFRAME 2
 uniform int u_GeometryDrawMode
@@ -199,6 +219,7 @@ uniform int u_GeometryDrawMode
 	float UIStep = 1;
 > = 1;
 
+#define SILHOUETTE_DRAW_NONE 0
 #define SILHOUETTE_DRAW_COLOR 1
 #define SILHOUETTE_DRAW_UVS 2
 uniform int u_SilhouetteDrawMode
@@ -211,6 +232,7 @@ uniform int u_SilhouetteDrawMode
 	float UIStep = 1;
 > = 1;
 
+#define CREASE_DRAW_NONE 0
 #define CREASE_DRAW_COLOR 1
 #define CREASE_DRAW_UVS 2
 #define CREASE_DRAW_LOD 3

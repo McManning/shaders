@@ -13,8 +13,9 @@
 #define MODE_CREASE_2 0.2
 #define MODE_CREASE_3 0.3
 
-// High values for geo/silh (can't be packed into color.a)
+// High values for other things (can't be packed into color.a)
 #define MODE_GEOMETRY 0.4
+#define MODE_BBOX 0.5 
 #define MODE_SILHOUETTE 0.9
 
 /**
@@ -213,7 +214,11 @@ GLSLShader TES
 GLSLShader GS
 {
     layout(triangles) in;
-    layout(triangle_strip, max_vertices = 16) out;
+
+    // Bbox = 24 vertices (but only on one source vertex & not in prod), 
+    // source face = 3, silhouette quad = 4, up to 3 creases = 4 * 3
+    // 42 is current driver limit
+    layout(triangle_strip, max_vertices = 42) out;
 
     vec3 xprime(float di, float dj, vec3 xi, vec3 xj) {
         float L = abs(di) + abs(dj);
@@ -435,6 +440,135 @@ GLSLShader GS
     }
 
     /**
+     * Draw geometry around the bounding box defined by u_BoundingBox
+     */
+    void drawBoundingBox() {
+        vec3 b = vec3(u_BoundingBox.x * 0.5, u_BoundingBox.y * 0.5, u_BoundingBox.z);
+
+        // Make sure the PS knows to render this differently
+        gsout.data1.x = MODE_BBOX;
+
+        // Front face
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, b.z, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, b.z, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, b.z, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, b.z, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        // back face
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, 0, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, 0, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, 0, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+        
+        EndPrimitive();
+
+        // Left face
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, b.z, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, b.z, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(b.x, -b.y, 0, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+        
+        EndPrimitive();
+
+        // Right face
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, b.z, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, b.z, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        EndPrimitive();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, b.z, 1);
+        gsout.color = vec4(0, 1, 0, 1);
+        EmitVertex();
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, -b.y, 0, 1);
+        gsout.color = vec4(1, 1, 0, 1);
+        EmitVertex(); 
+
+        gl_Position = u_MVPMatrix * vec4(-b.x, b.y, 0, 1);
+        gsout.color = vec4(1, 0, 0, 1);
+        EmitVertex();
+        
+        EndPrimitive();
+
+        // Skip top/bottom, don't need. Also could technically
+        // be accomplished with less vertices via box unwrapping
+    }
+
+    /**
      * Evaluate start and end coordinates of a silhouette edge
      * contained within the triangle and draw line geometry 
      */
@@ -527,6 +661,11 @@ GLSLShader GS
 
         if (u_CreaseDrawMode > 0) {
             drawCreases();
+        }
+
+        // Run once if debugging
+        if (u_DrawBoundingBox && gl_PrimitiveIDIn == 0) {
+            drawBoundingBox();
         }
     }
 }
@@ -863,12 +1002,12 @@ GLSLShader PS
         // color and our actual output color based on how close the
         // fragment is to a triangle edge
         if (u_GeometryDrawMode == GEOMETRY_DRAW_WIREFRAME) {
-            float d = min(psin.data2.x, min(psin.data2.y, psin.data2.z)) * 2.0;
-            // float intensity = exp2(-2.0 * d * d);
+            float scale = 1 / distance(u_CameraMatrix[3].xyz, psin.position.xyz) * 10;
+
+            float d = min(psin.data2.x, min(psin.data2.y, psin.data2.z)) * scale;
             d = smoothstep(0.025, 0.05, d);
 
             // draw the main color, but fade vertex edges on top of it
-            // TODO: Distance based
             color = lerp(color, d * color, 0.5);
         }
 
@@ -880,7 +1019,19 @@ GLSLShader PS
 
         if (cmp(mode, MODE_GEOMETRY)) {
             color = vec4(getGeometryColor(), 1);
-        } else {
+        } 
+        else if (cmp(mode, MODE_BBOX)) {
+            // Discard bbox interior
+            if (psin.color.x < 0.99 && psin.color.y < 0.99) {
+                discard;
+            }
+
+            // Colorize based on computed LOD (black = LOD0, grey = LOD1, white = LOD2)
+            color.rgb = vec3(getCurrentLOD() * 0.5);
+        }
+        else { // Crease/silhouette
+            // TODO: Crease set support
+
             PSEdgeInfo info = getPSEdgeInfo();
 
             // Generate a screen space capsule by discarding fragments
