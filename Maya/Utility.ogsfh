@@ -129,14 +129,80 @@ GLSLShader Utility
         return info;
     }
 
-    
     /**
-     * Retrieve the current LOD level the model should be rendered under
+     * Determine what percentage of the screen our 
+     * bounding box is currently covering
+     *
+     * @return float [0, 1]
+     */
+    float getScreenCoverage() {
+        float halfWidth = u_BoundingBox.x * 0.5;
+        float halfDepth = u_BoundingBox.y * 0.5;
+        float height = u_BoundingBox.z;
+        
+        // BBox corners in local space
+        vec4 p[8];
+        p[0] = vec4(halfWidth, halfDepth, height, 1);
+        p[1] = vec4(halfWidth, -halfDepth, height, 1);
+        p[2] = vec4(-halfWidth, halfDepth, height, 1);
+        p[3] = vec4(halfWidth, halfDepth, 0, 1);
+        p[4] = vec4(-halfWidth, -halfDepth, height, 1);
+        p[5] = vec4(halfWidth, -halfDepth, 0, 1);
+        p[6] = vec4(-halfWidth, halfDepth, 0, 1);
+        p[7] = vec4(-halfWidth, -halfDepth, 0, 1);
+
+        int i;
+
+        // Convert to NDC 
+        for (i = 0; i < 8; i++) {
+            p[i] = u_MVPMatrix * p[i];
+            p[i] /= p[i].w;
+        }
+
+        // Find minimum/maximum points
+        float hmin = p[0].x;
+        float hmax = p[0].x;
+        float vmin = p[0].y;
+        float vmax = p[0].y;
+
+        for (i = 1; i < 8; i++) {
+            hmin = min(hmin, p[i].x);
+            hmax = max(hmax, p[i].x);
+            vmin = min(vmin, p[i].y);
+            vmax = max(vmax, p[i].y);
+        }
+
+        // Convert min/max to range [0, 2]
+        hmin = clamp(hmin + 1, 0.0, 2.0);
+        hmax = clamp(hmax + 1, 0.0, 2.0);
+        vmin = clamp(vmin + 1, 0.0, 2.0);
+        vmax = clamp(vmax + 1, 0.0, 2.0);
+
+        // Calculate area 
+        float area = (hmax - hmin) * (vmax - vmin);
+
+        // Calculate percentage of total space used
+        return clamp(area / 4.0, 0.0, 1.0);
+    }
+
+    /**
+     * Return current LOD of the model based on BBox screen coverage
      *
      * @return int [0, 2]
      */
     int getCurrentLOD() {
-        return 0;
+        int lod = 0;
+        float coverage = getScreenCoverage();
+
+        // Switch LOD if screen coverage is 
+        // less than the upper bound at each LOD
+        if (coverage < u_LOD2) {
+            lod = 2;
+        } else if (coverage < u_LOD1) {
+            lod = 1;
+        }
+
+        return lod;
     }
 
     struct EdgeInfo {
@@ -222,6 +288,9 @@ GLSLShader Utility
         return -1;
     }
 
+    /**
+     * Shorthand float equality comparison with some error tolerance
+     */
     bool cmp(float a, float b) {
         return abs(a - b) < EPSILON;
     }
