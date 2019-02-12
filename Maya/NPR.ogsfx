@@ -238,15 +238,55 @@ GLSLShader GS
      */
     vec3 getOppositeEdgeDistanceVec(int idx) {
         int nextIdx = (idx + 1) % 3;
-        int nextIdx2 = (nextIdx + 1) % 3;
+        int oppositeIdx = (nextIdx + 1) % 3;
 
         // Vertex to edge distance calculations for wireframe rendering
         // as part of our fragment coloring (instead of a separate technique)
         vec4 v0 = u_ViewProjMatrix * gsin[idx].position;
         vec4 v1 = u_ViewProjMatrix * gsin[nextIdx].position;
-        vec4 v2 = u_ViewProjMatrix * gsin[nextIdx2].position;
+        vec4 v2 = u_ViewProjMatrix * gsin[oppositeIdx].position;
 
         float d = distanceToLine(v0.xyz, v1.xyz, v2.xyz);
+
+        if (idx == 0) {
+            return vec3(d, 0, 0);
+        } else if (idx == 2) {
+            return vec3(0, d, 0);
+        } else {
+            return vec3(0, 0, d);
+        }
+    }
+
+    /**
+     * Calculate a distance between a vertex and a crease edge
+     *
+     * Very similar to the wireframe drawing method, but only includes
+     * the edges that are along a valid crease
+     *
+     * @param int idx Vertex index in the GS input
+     * 
+     * @return vec3
+     */
+    vec3 getCreaseEdgeDistanceVec(int idx) {
+        int nextIdx = (idx + 1) % 3;
+        int oppositeIdx = (nextIdx + 1) % 3;
+
+        // Vertex to edge distance calculations for wireframe rendering
+        // as part of our fragment coloring (instead of a separate technique)
+        vec4 v0 = u_ViewProjMatrix * gsin[idx].position;
+        vec4 v1 = u_ViewProjMatrix * gsin[nextIdx].position;
+        vec4 v2 = u_ViewProjMatrix * gsin[oppositeIdx].position;
+
+        bool creaseOpposite =
+            gsin[nextIdx].data1.x <= MODE_CREASE_3 + EPSILON &&
+            gsin[oppositeIdx].data1.x <= MODE_CREASE_3 + EPSILON;
+
+        float d;
+        if (!creaseOpposite) {
+            d = 9999; // Big overflow - draw nothing
+        } else {
+            d = distanceToLine(v0.xyz, v1.xyz, v2.xyz);
+        }
 
         if (idx == 0) {
             return vec3(d, 0, 0);
@@ -299,8 +339,15 @@ GLSLShader GS
             // Ensure render mode for this triangle is in geometry
             gsout.data1.x = MODE_GEOMETRY;
 
-            // Edge distance calculation for wireframe rendering
-            gsout.data2 = getOppositeEdgeDistanceVec(i);
+            if (u_GlobalDrawMode == DRAW_MODE_MODELING) {
+                // If in modeling mode - this stores crease edge info 
+                // (whether or the edge is along a crease)
+                gsout.data2 = getCreaseEdgeDistanceVec(i);
+            } else {
+                // Otherwise - this is edge distance from the opposite vertex
+                // for use in wireframe rendering
+                gsout.data2 = getOppositeEdgeDistanceVec(i);
+            }
 
             gl_Position = u_MVPMatrix * gsin[i].position;
             EmitVertex();
@@ -651,15 +698,20 @@ GLSLShader GS
     }
 
     void main() {
-        if (u_GeometryDrawMode > 0) {
+        if (u_GeometryDrawMode != GEOMETRY_DRAW_NONE) {
             drawInputGeometry();
         }
 
-        if (u_SilhouetteDrawMode > 0 && isPotentialSilhouette()) {
+        if (u_SilhouetteDrawMode != SILHOUETTE_DRAW_NONE && 
+            u_GlobalDrawMode != DRAW_MODE_MODELING && 
+            isPotentialSilhouette()
+        ) {
             drawSilhouette();
         }
 
-        if (u_CreaseDrawMode > 0) {
+        if (u_CreaseDrawMode != CREASE_DRAW_NONE && 
+            u_GlobalDrawMode != DRAW_MODE_MODELING
+        ) {
             drawCreases();
         }
 
@@ -939,7 +991,7 @@ GLSLShader PS
     }
 
     /**
-     * Determine final color of the original input geometry
+     * Determine final color of the original input geometry for NPR rendering
      */
     vec3 getGeometryColor() {
         vec3 color;
@@ -950,7 +1002,7 @@ GLSLShader PS
         float light = 0.5;
         
         // Determine light/shadow contributions if lit
-        if (!u_Unlit) {
+        if (!u_Unlit && u_GlobalDrawMode != DRAW_MODE_UNLIT) {
             light = calculateLightContribution(
                 light0Enable, 
                 light0Type, 
@@ -1014,13 +1066,37 @@ GLSLShader PS
         return color;
     }
 
+    /**
+     * Alternative light model that lets us better see geometry while modeling.
+     *
+     * This is very similar to maya's default material - but color adjusted
+     * slightly and with additional information added for painted creases.
+     */
+    vec3 getModelingColor() {
+        vec3 eyeVec = u_CameraMatrix[3].xyz - psin.position.xyz;
+        vec3 L = normalize(eyeVec);
+        float NdotL = dot(psin.normal, L);
+
+        float diffuse = clamp(NdotL, 0, 1);
+        
+        // Wireframing
+        // float scale = 1 / distance(u_CameraMatrix[3].xyz, psin.position.xyz) * 10;
+        // float d = min(psin.data2.x, min(psin.data2.y, psin.data2.z)) * scale;
+        // d = smoothstep(0.025, 0.05, d);
+
+        vec3 color = vec3(diffuse * psin.color.rgb);
+
+        // draw the main color, but fade edges on top of it
+        // color = lerp(color, d * color, 0.5);
+        
+        return color;
+    }
+
     void main() {
         float mode = psin.data1.x;
 
-        if (cmp(mode, MODE_GEOMETRY)) {
-            color = vec4(getGeometryColor(), 1);
-        } 
-        else if (cmp(mode, MODE_BBOX)) {
+        // Debug BBox geometry 
+        if (cmp(mode, MODE_BBOX)) {
             // Discard bbox interior
             if (psin.color.x < 0.99 && psin.color.y < 0.99) {
                 discard;
@@ -1029,19 +1105,94 @@ GLSLShader PS
             // Colorize based on computed LOD (black = LOD0, grey = LOD1, white = LOD2)
             color.rgb = vec3(getCurrentLOD() * 0.5);
         }
-        else { // Crease/silhouette
-            // TODO: Crease set support
+        else { 
+            if (cmp(mode, MODE_GEOMETRY)) {
+                if (u_GlobalDrawMode == DRAW_MODE_MODELING) {
+                    // In "modeling" mode - original geometry is drawn with 
+                    // basic phong - with the camera as our light source. 
+                    // Creases are drawn as part of the source geometry 
+                    // instead of separate geo to better support Maya's 
+                    // modeling overlays (edge/vertex pickers)
+                    color = vec4(getModelingColor(), 1);
+                } else if (u_GlobalDrawMode == DRAW_MODE_SILHOUETTE) {
+                    // Just draw black
+                    color = vec4(0, 0, 0, 1);
+                } else {
+                    // Lookdev or unlit - use core NPR lighting model 
+                    color = vec4(getGeometryColor(), 1);
+                }
+            } 
+            else { // Crease/silhouette
+                // TODO: Crease set support
+                PSEdgeInfo info = getPSEdgeInfo();
 
-            PSEdgeInfo info = getPSEdgeInfo();
+                // Generate a screen space capsule by discarding fragments
+                // that are too far from the edge's line segment
+                if (info.segmentDistance > info.halfWidth) {
+                    discard;
+                }
 
-            // Generate a screen space capsule by discarding fragments
-            // that are too far from the edge's line segment
-            if (info.segmentDistance > info.halfWidth) {
-                discard;
+                if (u_GlobalDrawMode == DRAW_MODE_SILHOUETTE) {
+                    // Just draw black, regardless of settings
+                    color = vec4(0, 0, 0, 1);
+                } else {
+                    color = vec4(getEdgeColor(info), 1);
+                }
             }
-
-            color = vec4(getEdgeColor(info), 1);
         }
+    }
+}
+
+/**
+ * Geometry shader to generate colored lines (in line mode) for creases.
+ *
+ * This is a simplified representation that can be used while modeling 
+ * to track crease locations/LODs, and not representative of the final
+ * geometry-based creases.
+ */
+GLSLShader GS2
+{
+    layout(triangles) in;
+    layout(line_strip, max_vertices = 42) out;
+
+    void main() {
+        int next;
+
+        // Crease lines
+        for (int i = 0; i < 3; i++) {
+            next = (i + 1) % 3;
+
+            // If there's a valid crease edge between two vertices,
+            // render new geometry representing that crease
+            if (gsin[i].data1.x <= MODE_CREASE_3 + EPSILON &&
+                gsin[next].data1.x <= MODE_CREASE_3 + EPSILON
+            ) {
+                gsout.position = u_ModelMatrix * gsin[i].position;
+                gsout.normal = (u_ModelMatrix * vec4(gsin[i].normal, 0)).xyz;
+                gsout.data1.x = gsin[i].data1.x; // Crease mode/set
+                gsout.color = vec4(1);
+                
+                gl_Position = u_MVPMatrix * gsin[i].position;
+                EmitVertex();
+
+                gsout.position = u_ModelMatrix * gsin[next].position;
+                gsout.normal = (u_ModelMatrix * vec4(gsin[next].normal, 0)).xyz;
+                gsout.data1.x = gsin[next].data1.x; // Crease mode/set
+                gsout.color = vec4(1);
+
+                gl_Position = u_MVPMatrix * gsin[next].position;
+                EmitVertex();
+
+                EndPrimitive();
+            }
+        }
+    }
+}
+
+GLSLShader PS2
+{
+    void main() {
+        color = psin.color;
     }
 }
 
@@ -1062,7 +1213,27 @@ technique Main
         GeometryShader (in shaderdata gsin, out shaderdata gsout) = { Utility, GS };
         PixelShader (in shaderdata psin, out ps_out) = PS;
     }
-    
+
+    // Second pass is purely for debug/development information, 
+    // and is not used in the production build of the shader. 
+    // This pass utilizes line drawing in the geometry shader to render some 
+    // additional information about the mesh - including crease info and wireframes.
+    pass p2
+    <   
+        string drawContext = "colorPass";
+    >
+    {
+        // We use the same VS/TCS/TES to pipeline the same data through. 
+        // But we only really care about rendering different content through
+        // the geometry shader. A more optimal method would be to branch TCS/TES 
+        // and skip/trim the pipeline to not generate anything BUT crease geo.
+		VertexShader (in appdata, out shaderdata vsout) = VS;
+        TessControlShader (in shaderdata tcsin, out shaderdata tcsout) = { Utility, TCS };
+        TessEvaluationShader (in shaderdata tesin, out shaderdata tesout) = { Utility, TES };
+        GeometryShader (in shaderdata gsin, out shaderdata gsout) = { Utility, GS2 };
+        PixelShader (in shaderdata psin, out ps_out) = PS2;
+    }
+
 #ifdef USE_CUSTOM_SHADOWS
     // Custom shadow pass that accounts for tessellation
     pass p1

@@ -8,6 +8,26 @@
 #define USE_CUSTOM_SHADOWS 1
 
 // ---------------------------------------------
+// General Settings
+// ---------------------------------------------
+
+#define DRAW_MODE_WIREFRAME 0
+#define DRAW_MODE_MODELING 1
+// Poorly redundantly named. But oh well.
+#define DRAW_MODE_SILHOUETTE 2
+#define DRAW_MODE_UNLIT 3
+#define DRAW_MODE_LOOKDEV 4
+uniform int u_GlobalDrawMode
+<
+	string UIName = "Draw Mode";
+	string UIGroup = "General";
+	string UIFieldNames = "Wireframe:Modeling:Silhouette:Unlit:Lookdev";
+	float UIMin = 0;
+	float UIMax = 5;
+	float UIStep = 1;
+> = 1;
+
+// ---------------------------------------------
 // LOD Settings
 // ---------------------------------------------
 

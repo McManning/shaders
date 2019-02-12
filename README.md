@@ -26,7 +26,11 @@ Color information comes from vertex painting the RGB channels of the `crease` co
 
 ### LOD
 
-Each crease can be assigned an LOD (0-2). Each LOD is currently associated with a maximum distance from the origin of the mesh to the camera.
+Three LOD levels (0-2) are supported, using UE4-like screen coverage to calculate whether or not the model is in a given LOD. Each crease edge painted on the model can be assigned a specific LOD and will only be visible within that LOD. 
+
+By default, LOD0 is when the model's bounding box fills more than 66% of the screen, LOD2 when it covers 33% to 66%, and LOD2 when it covers less than 33%. 
+
+LOD bounding box is currently **shared** by all models that use the same material instance, so it's not particularly useful when compositing a full scene with shared materials within Maya. Bounding boxes are not shared in the actual game engine(s) so it becomes useful when prepping an individual model. 
 
 ### Crease Sets
 
@@ -38,10 +42,10 @@ Each painted crease can be given a specific set number that corresponds with add
 
 * Light cookies / decal for texture-driven specular reflections. 
 * Experiment with triplanar texturing for edges
-* Experiment with migrating GS code into a PN-AEN tessellation pipeline instead to reduce the amount of overhead calculations (performing edge detection prior to tessellation, rather than after on a larger number of edges). UE4 supports [providing adjacency information](https://github.com/EpicGames/UnrealEngine/blob/08ee319f80ef47dbf0988e14b546b65214838ec4/Engine/Source/Runtime/Engine/Private/TessellationRendering.cpp#L61) to the [tessellation pipeline](https://github.com/EpicGames/UnrealEngine/blob/08ee319f80ef47dbf0988e14b546b65214838ec4/Engine/Shaders/Private/PNTriangles.ush#L7) so it should be safe to utilize Maya's GLSL_PNAEN9 to its fullest. 
-* UE4-style LODs using screen space sizes of mesh bounding boxes instead of position distances
+* ~~Experiment with migrating GS code into a PN-AEN tessellation pipeline instead to reduce the amount of overhead calculations (performing edge detection prior to tessellation, rather than after on a larger number of edges). UE4 supports [providing adjacency information](https://github.com/EpicGames/UnrealEngine/blob/08ee319f80ef47dbf0988e14b546b65214838ec4/Engine/Source/Runtime/Engine/Private/TessellationRendering.cpp#L61) to the [tessellation pipeline](https://github.com/EpicGames/UnrealEngine/blob/08ee319f80ef47dbf0988e14b546b65214838ec4/Engine/Shaders/Private/PNTriangles.ush#L7) so it should be safe to utilize Maya's GLSL_PNAEN9 to its fullest.~~
+* ~~UE4-style LODs using screen space sizes of mesh bounding boxes instead of position distances~~
 * Resolve remaining z-order issues from edges to eliminate any uniform adjustments to make it "just right" per mesh. 
-* Transparency
+* Transparency - uniform and texture-based using whatever the alpha channel is in the texture.
 * Sharp texture mapping and decals 
 * Better draw modes for Maya to avoid hiding vertex/edge selections behind geometry
 * Silhouette control painting (variable widths, rejection)
@@ -53,8 +57,11 @@ Each painted crease can be given a specific set number that corresponds with add
 Bærentzen, J. A., Munk-Lund, S., Gjøl, M., & Larsen, B. D. (2008). Two Methods for Antialiased Wireframe
 Drawing with Hidden Line Removal. _Proceedings of the Spring Conference in Computer Graphics_
 
+Boubekeur, T., & Alexa, M. (2008). Phong Tessellation. ACM Trans. Graph., 27, 141:1-141:5.
+
 DesLauriers, M. (2015). Drawing Lines is Hard. Retrieved from [https://mattdesl.svbtle.com/drawing-lines-is-hard](https://mattdesl.svbtle.com/drawing-lines-is-hard)
 
 Hajagos, B., Szécsi, L., & Csébfalvi, B. (2013). Fast silhouette and crease edge synthesis with geometry shaders. _Budapest University of Technology and Economics_
 
 Rideout, P. (2010). Antialiased Cel Shading. Retrieved from [https://prideout.net/blog/old/blog/index.html@p=22.html](https://prideout.net/blog/old/blog/index.html@p=22.html)
+
