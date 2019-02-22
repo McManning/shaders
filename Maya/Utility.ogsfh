@@ -101,34 +101,6 @@ GLSLShader Utility
         return interim == 0;
     }
 
-    // Data extraction from a crease alpha value
-    struct CreaseInfo {
-        bool valid;
-        int id;
-        int lod;
-        int mode;
-        bool bump;
-        float thickness;
-    };
-
-    CreaseInfo extractCreaseInfo(float a) {
-        CreaseInfo info;
-
-        // Early exit if there's no alpha value 
-        info.valid = a > EPSILON && damm(int(floor(a * 10000)));
-
-        if (info.valid) {
-            int x = int(floor(a * 1000));
-
-            info.lod = (x & 768) / 256;
-            info.mode = (x & 192) / 64;
-            info.bump = (x & 32) > 30;
-            info.thickness = (x & 31) / 31.0;
-        }
-        
-        return info;
-    }
-
     /**
      * Determine what percentage of the screen our 
      * bounding box is currently covering
@@ -206,10 +178,7 @@ GLSLShader Utility
     }
 
     struct EdgeInfo {
-        bool valid;
-        int id;
-        int lod;
-        int mode;
+        int group;
         bool bump;
         float thickness;
     };
@@ -217,23 +186,22 @@ GLSLShader Utility
     /**
      * Unpack structured edge information and check for validity
      *
-     * @param int vertexId used to check winding order in isValidEdge()
      */
-    EdgeInfo unpackEdgeInfo(float a, int id) {
+    EdgeInfo unpackEdgeInfo(float a) {
         EdgeInfo info;
-        info.id = id;
 
         // Early exit if there's no alpha value 
-        info.valid = a > EPSILON && damm(int(floor(a * 10000)));
-
-        if (info.valid) {
-            int x = int(floor(a * 1000));
-
-            info.lod = (x & 768) / 256;
-            info.mode = (x & 192) / 64;
-            info.bump = (x & 32) > 30;
-            info.thickness = (x & 31) / 31.0;
+        bool valid = a > EPSILON && damm(int(floor(a * 10000)));
+        if (!valid) {
+            return info;
         }
+
+        int x = int(floor(a * 1000));
+
+        // info.lod = (x & 768) / 256;
+        info.group = (x & 192) / 64;
+        info.bump = (x & 32) > 30;
+        info.thickness = (x & 31) / 31.0;
         
         return info;
     }

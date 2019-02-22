@@ -7,6 +7,28 @@
 // Whether or not to use the shadowcasting shaders in Shadows.ogsfh
 #define USE_CUSTOM_SHADOWS 1
 
+// Less hardcoding, and I can ctrl+f LOD usage.
+#define LOD0 0
+#define LOD1 1
+#define LOD2 2
+
+// Crease group color blend modes
+#define BLEND_MULTIPLY 0
+#define BLEND_REPLACE 1
+
+// Crease edge groups
+#define EDGE_NONE 0
+#define EDGE_GROUP_1 1
+#define EDGE_GROUP_2 2
+#define EDGE_GROUP_3 3
+#define EDGE_SILHOUETTE 4
+
+// Bump flag to OR with an edge group
+#define EDGE_BUMP 4
+
+// Default edge thickness for the silhouette/crease groups
+#define DEFAULT_THICKNESS 0.065
+
 // ---------------------------------------------
 // General Settings
 // ---------------------------------------------
@@ -50,16 +72,8 @@ uniform float u_LOD2
 	string UIName = "LOD2";
 > = 0.333;
 
-// uniform vec3 u_AABB
-// <
-// 	string UIGroup = "LOD";
-// 	string UIName = "AABB";
-// > = { 1, 1, 1 };
-
-// TODO: Disable silhouette on LOD2?
-
 // ---------------------------------------------
-// Color Settings
+// Base Geometry Settings
 // ---------------------------------------------
 // If vertex coloring is enabled, u_Shaded/u_Specular/u_Outline
 // are multipliers on the the vertex color.
@@ -99,6 +113,151 @@ uniform vec3 u_Specular : SPECULAR
 	string UIGroup = "Color";
 	string UIWidget = "Color";
 > = {0.9, 0.9, 0.9};
+
+// ---------------------------------------------
+// Silhouette Settings
+// ---------------------------------------------
+uniform int u_SilhouetteBlendMode
+<
+	string UIGroup = "Silhouette";
+	string UIName = "Blend Mode";
+	string UIFieldNames = "Multiply:Replace";
+	float UIMin = 0;
+	float UIMax = 2;
+	float UIStep = 1;
+> = 0;
+
+uniform vec3 u_SilhouetteColor : COLOR
+<
+    string UIGroup = "Silhouette";
+    string UIName = "Color";
+    string UIWidget = "Color";
+> = {0, 0, 0};
+
+uniform float u_SilhouetteThickness
+<
+    string UIGroup = "Silhouette";
+    string UIName = "Thickness";
+> = DEFAULT_THICKNESS;
+
+uniform int u_SilhouetteLOD
+<
+	string UIGroup = "Silhouette";
+	string UIName = "LOD";
+	string UIFieldNames = "LOD0:LOD1:LOD2";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = LOD2;
+
+// ---------------------------------------------
+// Group 1 Settings
+// ---------------------------------------------
+uniform int u_Group1BlendMode
+<
+	string UIGroup = "Group 1";
+	string UIName = "Blend Mode";
+	string UIFieldNames = "Multiply:Replace";
+	float UIMin = 0;
+	float UIMax = 2;
+	float UIStep = 1;
+> = 0;
+
+uniform vec3 u_Group1Color : COLOR
+<
+    string UIGroup = "Group 1";
+    string UIName = "Color";
+    string UIWidget = "Color";
+> = {0, 0, 0};
+
+uniform float u_Group1Thickness
+<
+    string UIGroup = "Group 1";
+    string UIName = "Thickness";
+> = DEFAULT_THICKNESS;
+
+uniform int u_Group1LOD
+<
+	string UIGroup = "Group 1";
+	string UIName = "LOD";
+	string UIFieldNames = "LOD0:LOD1:LOD2";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = LOD2;
+
+// ---------------------------------------------
+// Group 2 Settings
+// ---------------------------------------------
+uniform int u_Group2BlendMode
+<
+	string UIGroup = "Group 2";
+	string UIName = "Blend Mode";
+	string UIFieldNames = "Multiply:Replace";
+	float UIMin = 0;
+	float UIMax = 2;
+	float UIStep = 1;
+> = 0;
+
+uniform vec3 u_Group2Color : COLOR
+<
+    string UIGroup = "Group 2";
+    string UIName = "Color";
+    string UIWidget = "Color";
+> = {1, 0, 0};
+
+uniform float u_Group2Thickness
+<
+    string UIGroup = "Group 2";
+    string UIName = "Thickness";
+> = DEFAULT_THICKNESS;
+
+uniform int u_Group2LOD
+<
+	string UIGroup = "Group 2";
+	string UIName = "LOD";
+	string UIFieldNames = "LOD0:LOD1:LOD2";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = LOD2;
+
+// ---------------------------------------------
+// Group 3 Settings
+// ---------------------------------------------
+uniform int u_Group3BlendMode
+<
+	string UIGroup = "Group 3";
+	string UIName = "Blend Mode";
+	string UIFieldNames = "Multiply:Replace";
+	float UIMin = 0;
+	float UIMax = 2;
+	float UIStep = 1;
+> = 0;
+
+uniform vec3 u_Group3Color : COLOR
+<
+    string UIGroup = "Group 3";
+    string UIName = "Color";
+    string UIWidget = "Color";
+> = {0, 1, 0};
+
+uniform float u_Group3Thickness
+<
+    string UIGroup = "Group 3";
+    string UIName = "Thickness";
+> = DEFAULT_THICKNESS;
+
+uniform int u_Group3LOD
+<
+	string UIGroup = "Group 3";
+	string UIName = "LOD";
+	string UIFieldNames = "LOD0:LOD1:LOD2";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = LOD2;
+
 
 // ---------------------------------------------
 // Outline (Silhouettes/Creases) Settings
