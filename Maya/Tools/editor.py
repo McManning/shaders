@@ -277,41 +277,6 @@ def makeAlpha(lod, mode, bump, thickness):
     # print('makeAlpha final: {}'.format(a))
     return a
 
-
-def bumpCrease():
-    """Update creased vertices in a way s.t. they cannot connect
-        directly to another bumped vertex.
-    """
-    selected = cmds.ls(selection=True)
-    if len(selected) < 1:
-        return
-    
-    # Make sure we're working on vertices
-    cmds.select(cmds.polyListComponentConversion(tv=True))
-    vertices = cmds.ls(selection=True, flatten=True)
-    alphas = cmds.polyColorPerVertex(query=True, a=True)
-
-    # Actually - might be easier to just give all a static
-    # offset. Because 2 verts with an offset will never
-    # connect (can only be connected to a 0.X0 vertex)
-    # a = math.floor(alphas[0] * 10) / 10 + 0.01
-    # cmds.polyColorPerVertex(a=a)
-    
-    # Have to loop instead of polyColorPerVertex all at once
-    # because we need to maintain LOD/thickness parts.
-    for i in range(0, len(alphas)):
-        lod, mode, bump, thickness = breakAlpha(alphas[i])
-        print('Bump from {} - {}, {}, {}, {}'.format(alphas[i], lod, mode, bump, thickness))
-        a = makeAlpha(lod, mode, 1, thickness)
-        print(a)
-        lod, mode, bump, thickness = breakAlpha(a)
-        print('New alpha {} - {}, {}, {}, {}'.format(a, lod, mode, bump, thickness))
-        cmds.select(vertices[i], replace=True)
-        cmds.polyColorPerVertex(a=a)
-
-    # Restore selection
-    cmds.select(selected, replace=True)
-
 def sharpenCrease(slider):
     """Sharpen (reduce width) of selected creased vertices.
         First vertex will be given a small width, and progress
@@ -508,7 +473,6 @@ def addMiscGroup(window):
 
     cmds.button(label="Soften all edges", command="softenModel()")
     cmds.button(label="Delete History", command="cmds.DeleteHistory()")
-    cmds.button(label="Bump Crease", command="bumpCrease()")
     cmds.button(label="Reset Mesh", command="resetMesh()")
     cmds.button(label="Test A", command="testA()")
     cmds.button(
