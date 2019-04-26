@@ -26,7 +26,7 @@ Version: {}
 Author: Chase McManning <mcmanning.1@osu.edu>
 """.format(TITLE, VERSION)
 
-CREASE_COLORSET = "crease"
+CREASE_COLORSET = "colorSet"
 
 def damm(val):
     # Damm Algorithm matrix is sourced from:

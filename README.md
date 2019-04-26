@@ -45,9 +45,9 @@ Each painted crease can be given a specific set number that corresponds with add
 * ~~Experiment with migrating GS code into a PN-AEN tessellation pipeline instead to reduce the amount of overhead calculations (performing edge detection prior to tessellation, rather than after on a larger number of edges). UE4 supports [providing adjacency information](https://github.com/EpicGames/UnrealEngine/blob/08ee319f80ef47dbf0988e14b546b65214838ec4/Engine/Source/Runtime/Engine/Private/TessellationRendering.cpp#L61) to the [tessellation pipeline](https://github.com/EpicGames/UnrealEngine/blob/08ee319f80ef47dbf0988e14b546b65214838ec4/Engine/Shaders/Private/PNTriangles.ush#L7) so it should be safe to utilize Maya's GLSL_PNAEN9 to its fullest.~~
 * ~~UE4-style LODs using screen space sizes of mesh bounding boxes instead of position distances~~
 * Resolve remaining z-order issues from edges to eliminate any uniform adjustments to make it "just right" per mesh. 
-* Transparency - uniform and texture-based using whatever the alpha channel is in the texture.
+* Transparency - uniform and texture-based using whatever the alpha channel is in the texture. **Nightmare for Maya - may avoid and just deal with in-engine solutions**
 * Sharp texture mapping and decals 
-* Better draw modes for Maya to avoid hiding vertex/edge selections behind geometry
+* ~~Better draw modes for Maya to avoid hiding vertex/edge selections behind geometry~~
 * Silhouette control painting (variable widths, rejection)
 * Better shadows (low priority though - this will end up being *very* engine-specific)
 

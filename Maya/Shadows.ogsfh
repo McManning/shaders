@@ -1,7 +1,9 @@
 /**
- * Shadowcasting with tessellation.
+ * Shadowcasting with Phong tessellation.
  *
  * Edges are ignored for shadowcasting, and only the original (tessellated) geometry is used.
+ * 
+ * @author Chase McManning <cmcmanning@gmail.com>
  */
 
 attribute shadowdata {

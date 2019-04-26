@@ -11,6 +11,9 @@ uniform mat4 u_NormalMatrix : WorldInverseTranspose;
 uniform mat4 u_CameraMatrix : ViewInverse;
 uniform mat4 u_ViewProjMatrix : ViewProjection < string UIWidget = "None"; >;
 
+// Extra stuff Maya provides
+uniform vec2 u_ViewportPixelSize : ViewportPixelSize <string UIWidget = "None"; >;
+
 #define EPSILON 0.000001
 #define PI 3.14
 

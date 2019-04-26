@@ -25,7 +25,13 @@ uniform int u_GlobalDrawMode
 	float UIMin = 0;
 	float UIMax = 5;
 	float UIStep = 1;
-> = 1;
+> = 4;
+
+// uniform float u_Opacity
+// <
+// 	string UIName = "Opacity";
+// 	string UIGroup = "General";
+// > = 1.0;
 
 // ---------------------------------------------
 // LOD Settings
@@ -49,14 +55,6 @@ uniform float u_LOD2
 	string UIGroup = "LOD";
 	string UIName = "LOD2";
 > = 0.333;
-
-// uniform vec3 u_AABB
-// <
-// 	string UIGroup = "LOD";
-// 	string UIName = "AABB";
-// > = { 1, 1, 1 };
-
-// TODO: Disable silhouette on LOD2?
 
 // ---------------------------------------------
 // Color Settings
@@ -116,11 +114,11 @@ uniform float u_CreaseScale
     string UIGroup = "Outline";
 > = 0.065;
 
-uniform float u_EdgeOpacity
-<
-	string UIName = "Opacity";
-	string UIGroup = "Outline";
-> = 1.0;
+// uniform float u_EdgeOpacity
+// <
+// 	string UIName = "Opacity";
+// 	string UIGroup = "Outline";
+// > = 1.0;
 
 uniform bool u_OutlineViewSpaceScale
 <
@@ -188,6 +186,12 @@ uniform bool u_CastsShadows
 //     string UIName = "Debug Mode";
 //     string UIGroup = "Debug";
 // > = false;
+
+uniform vec2 u_FatLineWidth
+<
+	string UIName = "Fat Line Width";
+	string UIGroup = "Debug";
+> = {1, 1};
 
 uniform int u_TessInner
 <
