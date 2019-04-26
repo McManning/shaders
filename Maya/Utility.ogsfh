@@ -114,7 +114,7 @@ GLSLShader Utility
         float thickness;
     };
 
-    CreaseInfo extractCreaseInfo(float a) {
+    CreaseInfo LEGACY_extractCreaseInfo(float a) {
         CreaseInfo info;
 
         // Early exit if there's no alpha value 
@@ -211,9 +211,6 @@ GLSLShader Utility
     struct EdgeInfo {
         bool valid;
         int id;
-        int lod;
-        int mode;
-        bool bump;
         float thickness;
     };
 
@@ -225,18 +222,8 @@ GLSLShader Utility
     EdgeInfo unpackEdgeInfo(float a, int id) {
         EdgeInfo info;
         info.id = id;
-
-        // Early exit if there's no alpha value 
-        info.valid = a > EPSILON && damm(int(floor(a * 10000)));
-
-        if (info.valid) {
-            int x = int(floor(a * 1000));
-
-            info.lod = (x & 768) / 256;
-            info.mode = (x & 192) / 64;
-            info.bump = (x & 32) > 30;
-            info.thickness = (x & 31) / 31.0;
-        }
+        info.valid = floor((a * 100 - floor(a * 100)) * 100) == 12;
+        info.thickness = a;
         
         return info;
     }
@@ -251,18 +238,7 @@ GLSLShader Utility
      * @return boolean
      */
     bool isValidEdge(EdgeInfo start, EdgeInfo end) {
-        // Increasing vertex IDs, both at *least* the 
-        // input LOD, *and* one of them is an exact 
-        // crease vertex
-        if (!start.valid || !end.valid) {
-            return false;
-        }
-
-        int lod = getCurrentLOD();
-
-        return (start.id < end.id) &&
-            (start.lod >= lod && end.lod >= lod) &&
-            (start.bump == false || end.bump == false);
+        return start.valid && end.valid && start.id < end.id;
     }
 
     /**

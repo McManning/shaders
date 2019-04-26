@@ -91,8 +91,6 @@ GLSLShader TCS
 
         float a = tcsin[gl_InvocationID].color.a;
 
-        tcsout[gl_InvocationID].data1.z = 1;
-
         // If there's valid data encoded in the alpha channel, parse
         EdgeInfo info = unpackEdgeInfo(a, int(tcsin[idx].data1.y));
         if (info.valid) {
@@ -103,7 +101,7 @@ GLSLShader TCS
             // If the vertex is part of a drawable edge, repack edge info to something
             // that is easier to interpolate later.
             if (isValidEdge(info, nextInfo) || isValidEdge(oppositeInfo, info)) {
-                tcsout[gl_InvocationID].data1.x = info.mode * 0.1;
+                tcsout[gl_InvocationID].data1.x = GEO_PAINTED_EDGE;
                 tcsout[gl_InvocationID].color.a = info.thickness;
             }
         }

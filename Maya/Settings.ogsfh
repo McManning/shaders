@@ -79,7 +79,7 @@ uniform vec3 u_OutlineColor
     string UIName = "Outline";
     string UIGroup = "Color";
     string UIWidget = "Color";
-> = {1, 1, 1};
+> = {0.1, 0.1, 0.1};
 
 // TODO: Technically the ambient color, but it isn't
 // multiplied with diffuse. I might also want a different

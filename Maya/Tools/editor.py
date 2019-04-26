@@ -16,6 +16,9 @@ RIGHT = 0 # X
 UP = 1 # Y
 FORWARD = 2 # Z
 
+# Default vertex color when resetting a mesh (brownish)
+DEFAULT_COLOR = (0.346, 0.22, 0.134)
+
 # Shader vec3 uniform to store BBox calculations
 BOUNDING_BOX_UNIFORM = 'u_BoundingBox'
 
@@ -178,12 +181,13 @@ def clear():
     cmds.polyColorPerVertex(a=0)
     cmds.select(selected)
 
-
-def crease(lod, mode, bump, thickness):
+def crease(thickness):
     """Modify the crease dataset for the selected vertices"""
     setColorset()
     
-    a = makeAlpha(lod, mode, bump, thickness)
+    # Ensure thickness is within [0.99, 0.01]
+    # and apply a signature at the end to avoid interpolation errors
+    a = min(0.99, max(0.01, thickness)) + 0.001230001 
 
     # Convert selection to vertices, set alpha channel for each, 
     # then convert back to the previous selection
@@ -192,9 +196,8 @@ def crease(lod, mode, bump, thickness):
     cmds.polyColorPerVertex(a=a)
     cmds.select(selected)
 
-
-def selectCreases(lodIn=None):
-    """Select all crease geometry in the object with the given LOD (or all, if not specified)"""
+def selectCreases():
+    """Select all vertices with crease data"""
     # TODO: Support subset selection (select matches that are a subset of what we already selected)
     selected = cmds.ls(selection=True)
     if len(selected) < 1:
@@ -203,23 +206,15 @@ def selectCreases(lodIn=None):
     cmds.select(getParent(selected[0]), replace=True)
     cmds.select(cmds.polyListComponentConversion(tv=True))
 
-    lowerBound = 0
-    upperBound = 2
-
-    if lodIn is not None:
-        lowerBound = lodIn
-        upperBound = lodIn
-
     vertices = cmds.ls(selection=True, flatten=True)
     alphas = cmds.polyColorPerVertex(query=True, a=True)
 
     # TODO: faster?
     subset = []
     for i in range(0, len(alphas)):
-        lod, mode, bump, thickness = breakAlpha(alphas[i])
-        if lod >= lowerBound and lod <= upperBound:
+        if (breakAlphaV3(alphas[i]) > -1):
             subset.append(vertices[i])
-    
+            
     cmds.select(subset, replace=True)
 
 
@@ -235,7 +230,7 @@ def breakAlphaV1(a):
     return (lod, bump, thickness)
 
 
-def breakAlpha(a):
+def breakAlphaV2(a):
     """Break alpha value into LOD, Mode, Bump, and Thickness
 
         Version 2 uses a 4 decimal places, 3 to pack the above
@@ -259,23 +254,33 @@ def breakAlpha(a):
     return (lod, mode, bump, thickness)
 
 
-def makeAlpha(lod, mode, bump, thickness):
+def makeAlphaV2(lod, mode, bump, thickness):
     """Make an alpha value from LOD/mode/bump/thickness"""
     # Re-encode components into a single value
     a = int(lod) * 256 | int(mode) * 64 | int(bump) * 32 | int(thickness)
 
-    # print('makeAlpha a: {}'.format(a))
+    # print('makeAlphaV2 a: {}'.format(a))
 
     # Offset to the [0,1) range and append a checksum
     # An extra 0.00001 is added to correct for rounding errors 
     # with pushing between Python and Maya. Unused in decoding.
     checksum = damm(a)
-    # print('makeAlpha checksum: {}'.format(checksum))
+    # print('makeAlphaV2 checksum: {}'.format(checksum))
 
     a = (a * 100.0 + checksum * 10.0 + 1) / 100000.0
 
-    # print('makeAlpha final: {}'.format(a))
+    # print('makeAlphaV2 final: {}'.format(a))
     return a
+
+def breakAlphaV3(a):
+    """Returns -1 on an invalid alpha. Otherwise, returns thickness """
+    if (math.floor((a * 100.0 - math.floor(a * 100.0)) * 10000) == 1230):
+        return math.floor(a * 100.0) / 100.0
+    
+    return -1
+
+def makeAlphaV3(thickness):
+    return math.floor(thickness * 100.0) / 100.0 + 0.001230001
 
 def sharpenCrease(slider):
     """Sharpen (reduce width) of selected creased vertices.
@@ -283,17 +288,14 @@ def sharpenCrease(slider):
         until the last vertex in the selection
     """
     min_thickness = cmds.floatSliderGrp(slider, query=True, value=True)
-    min_thickness = min_thickness * 31
+    min_thickness = min_thickness + 0.1
 
     selected = cmds.ls(orderedSelection=True, flatten=True)
     if len(selected) < 1:
         return
 
-    # Ensure selection is a vertex list
-    # cmds.select(cmds.polyListComponentConversion(tv=True))
-    
     alphas = cmds.polyColorPerVertex(query=True, a=True)
-    lod, mode, bump, thickness = breakAlpha(alphas.pop())
+    thickness = breakAlphaV3(alphas.pop())
 
     # If minimum is greater than maximum, then all vertices will
     # gain the same thickness 
@@ -309,19 +311,19 @@ def sharpenCrease(slider):
     print(max_thickness)
 
     cmds.select(selected[-1], replace=True)
-    cmds.polyColorPerVertex(a=makeAlpha(lod, mode, bump, max_thickness))
+    cmds.polyColorPerVertex(a=makeAlphaV3(max_thickness))
     
     # Set every other vert in the list to increment to the local maximum 
     flen = len(alphas) * 1.0
     for i in range(0, len(alphas)):
-        lod, mode, bump, thickness = breakAlpha(alphas[i])
         thickness = min_thickness + (i / flen) * (max_thickness - min_thickness)
 
         print(selected[i])
         print(thickness)
+        print(makeAlphaV3(thickness))
 
         cmds.select(selected[i], replace=True)
-        cmds.polyColorPerVertex(a=makeAlpha(lod, mode, bump, thickness))
+        cmds.polyColorPerVertex(a=makeAlphaV3(thickness))
 
     # Restore selection
     cmds.select(selected, replace=True)
@@ -354,12 +356,31 @@ def resetMesh():
     cmds.select(cmds.polyListComponentConversion(te=True))
     cmds.polySoftEdge(a=180)
 
-    # Reset vertex colors of every vertex to white + no crease data
+    # Reset vertex colors of every vertex to a base color + no crease data
     cmds.select(cmds.polyListComponentConversion(tv=True))
-    cmds.polyColorPerVertex(r=1, g=1, b=1, a=0)
+
+    (r, g, b) = DEFAULT_COLOR
+    cmds.polyColorPerVertex(r=r, g=g, b=b, a=0)
 
     # Restore selection
     cmds.select(selected, replace=True)
+
+def migrate2to3():
+    """Migrate version 2 of the alpha set of a mesh to version 3.
+
+        v3 removes everything and uses alpha solely for thickness.
+        Vertices with a thickness of 0 are ignored for creases.
+
+        This is due to multiple reasons:
+        * Different strategy is going to be used for LOD management within Unity
+        * `mode` was an unnecessary feature that can easily be replaced by applying
+            multiple materials to a mesh (confirmed that our postprocessing of asset 
+            imports in Unity will optimally handle this scenario)
+        * Rather than using Damm to (slowly) validate vertices, we'll have fixed digits
+            "0.xx1230" that are used to validate the vertex. Deviation from this will be 
+            marked as invalid. 
+    """
+    pass
 
 def migrate1to2():
     """Migrate version 1 of the alpha set of a mesh to version 2.
@@ -386,7 +407,7 @@ def migrate1to2():
             # Lower LOD by 1 value so LOD0 = 0, etc
             lod = lod - 1
 
-            a = makeAlpha(lod, mode, bump, thickness)
+            a = makeAlphaV2(lod, mode, bump, thickness)
 
             cmds.select(vertices[i], replace=True)
             cmds.polyColorPerVertex(a=a)
@@ -400,8 +421,8 @@ def testA():
     alphas = cmds.polyColorPerVertex(query=True, a=True)
 
     for alpha in alphas:
-        lod, mode, bump, thickness = breakAlpha(alpha)
-        print('{} - LOD: {}, Mode: {}, Bump: {}, Thickness: {}'.format(
+        lod, mode, bump, thickness = breakAlphaV2(alpha)
+        print('{} - V2 LOD: {}, Mode: {}, Bump: {}, Thickness: {}'.format(
             alpha, lod, mode, bump, thickness
         ))
 
@@ -439,16 +460,11 @@ def addCreaseGroup(window):
 
     cmds.rowLayout(numberOfColumns=4)
     cmds.button(label="Clear Selected", command="clear()")
-    cmds.button(label="Crease (LOD0)", command="crease(0, 0, 0, 31)")
-    cmds.button(label="Crease (LOD1)", command="crease(1, 0, 0, 31)")
-    cmds.button(label="Crease (LOD2)", command="crease(2, 0, 0, 31)")
+    cmds.button(label="Crease", command="crease(1.0)")
     cmds.setParent("..")
 
     cmds.rowLayout(numberOfColumns=4)
     cmds.button(label="Select All", command="selectCreases()")
-    cmds.button(label="Select LOD0", command="selectCreases(0.10)")
-    cmds.button(label="Select LOD1", command="selectCreases(0.20)")
-    cmds.button(label="Select LOD2", command="selectCreases(0.30)")
     cmds.setParent("..")
 
     cmds.columnLayout(rowSpacing=5)
