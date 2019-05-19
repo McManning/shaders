@@ -81,6 +81,19 @@ uniform vec3 u_OutlineColor
     string UIWidget = "Color";
 > = {0.1, 0.1, 0.1};
 
+#define OUTLINE_BLEND_MULTIPLY 0
+#define OUTLINE_BLEND_SCREEN 1
+#define OUTLINE_BLEND_REPLACE 2
+uniform int u_OutlineBlendMode
+<
+	string UIName = "Outline Blend Mode";
+	string UIGroup = "Color";
+	string UIFieldNames = "Multiply:Screen:Replace";
+	float UIMin = 0;
+	float UIMax = 3;
+	float UIStep = 1;
+> = 0;
+
 // TODO: Technically the ambient color, but it isn't
 // multiplied with diffuse. I might also want a different
 // input setup for ambient color as another factor.

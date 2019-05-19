@@ -897,7 +897,11 @@ GLSLShader PSUtility
                 color = u_OutlineColor;
                 
                 if (u_UseVertexColors) {
-                    color *= psin.color.rgb;
+                    if (u_OutlineBlendMode == OUTLINE_BLEND_MULTIPLY) {
+                        color *= psin.color.rgb;
+                    } else if (u_OutlineBlendMode == OUTLINE_BLEND_SCREEN) {
+                        color = 1.0 - (1.0 - psin.color.rgb) * (1.0 - color);
+                    } // else OUTLINE_BLEND_REPLACE - no blend
                 }
             }
         } else {
@@ -907,7 +911,11 @@ GLSLShader PSUtility
                 color = u_OutlineColor;
 
                 if (u_UseVertexColors) {
-                    color *= psin.color.rgb;
+                    if (u_OutlineBlendMode == OUTLINE_BLEND_MULTIPLY) {
+                        color *= psin.color.rgb;
+                    } else if (u_OutlineBlendMode == OUTLINE_BLEND_SCREEN) {
+                        color = 1.0 - (1.0 - psin.color.rgb) * (1.0 - color);
+                    } // else OUTLINE_BLEND_REPLACE - no blend
                 }
             }
         }
