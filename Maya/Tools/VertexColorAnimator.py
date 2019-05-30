@@ -9,15 +9,68 @@ issues with Maya's built in vertex color animation tools:
 - Cannot export animations (sans transforms and visibility) to FBX for use in Unity
 
 TODO:
-- UV indexing so the FBX will be able to map up vertices when loading in Unity/etc
-
+- UV indexing on export so the FBX will be able to map up vertices when loading in Unity/etc
+- Vertex color animation data compressed and exported within the FBX
+    (remove vertices from frames that never animate, pull keyframe timings, 
+    build out a JSON blob that contains the keyframed index changes and all
+    the modified vertex color data per-frame)
+    
 @author Chase McManning <cmcmanning@gmail.com>
 """
 
 import sys, traceback
 import json
 import maya.cmds as cmds
+import maya.api.OpenMaya as om
 
+def selected_meshes():
+    """Generator to return DAG paths of all selected meshes
+
+    Returns:
+        string: Selected mesh DAG path
+    """
+    selection = om.MGlobal.getActiveSelectionList()
+
+    # TODO: See if there's a way to get the mesh of a selected vertex
+    sel_it = om.MItSelectionList(selection)
+    while not sel_it.isDone():
+        dag_path = om.MDagPath()
+
+        if sel_it.itemType() == om.MItSelectionList.kDagSelectionItem:
+            dag_path = sel_it.getDagPath()
+
+            if dag_path.hasFn(om.MFn.kMesh):
+                yield dag_path
+
+        sel_it.next()
+
+def dag_node(xform):
+    """Utility to transform a string DAG path to a node
+
+    Parameters:
+        xform (str): DAG path to parse
+
+    Returns:
+        MDagNode: Node from the path, or None if cannot be resolved
+    """
+    selection = om.MSelectionList()
+    try:
+        selection.add(xform)
+    except:
+        return None
+
+    return selection.getDagPath(0)
+
+def safe_exceptions(func):
+    """Decorator to improve exception handling in Maya"""
+    def wrapper(*args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            traceback.print_exception(exc_type, exc_value, exc_traceback,
+                                      limit=10, file=sys.stdout)   
+    return wrapper
 
 class VertexColorFrame:
     """Cache information about vertex colors for a mesh
@@ -26,50 +79,33 @@ class VertexColorFrame:
     a format for inclusion in the FBX file export
     """
     def __init__(self):
-        """
-        Parameters:
-            cache (dict): Default cache
-        """
         self.cache = [] 
         self.vtx_count = 0
 
-    def copy_from(self, obj):
+    def copy_from(self, mesh):
         """Copy the colors from the input mesh into this frame
 
         Parameters:
-            obj (str): Target mesh
+            mesh (MObject): Target mesh
         """
-        rgb = cmds.polyColorPerVertex(obj + '.vtx[*]', query=True, rgb=True)
-        self.cache = rgb 
-        self.vtx_count = int(len(rgb) / 3)
+        # MColor instances are converted to Python tuples to cache,
+        # as Maya will eventually unload the allocated memory 
+        self.cache = [c.getColor() for c in mesh.getVertexColors()]
+        self.vtx_count = len(self.cache)
 
-    def copy_to(self, obj):
+    def copy_to(self, mesh):
         """Copy the colors of this frame back onto the input mesh
 
         Parameters:
-            obj (str): Target mesh
+            mesh (MObject): Target mesh
         """
-        rgb = cmds.polyColorPerVertex(obj + '.vtx[*]', query=True, rgb=True)
-        indices = self.diff_vtx_list(rgb)
-            
-        # Group up indices by color.
-        # TODO: Still incredibly slow for large vertex counts of the
-        # target mesh (not necessarily large vertex counts to be updated)
-        batches = dict()
-        for vtx_id in indices:
-            idx = vtx_id * 3
-            rgb = (self.cache[idx], self.cache[idx + 1], self.cache[idx + 2])
-            if rgb not in batches:
-                batches[rgb] = ['{}.vtx[{}]'.format(obj, vtx_id)]
-            else:
-                batches[rgb].append('{}.vtx[{}]'.format(obj, vtx_id))
-        
-        for rgb in batches:
-            cmds.polyColorPerVertex(batches[rgb], rgb=rgb, notUndoable=True)
+        mesh.setVertexColors(self.cache, list(range(self.vtx_count)))
+        # TODO: For large meshes (> 20k vertices) this isn't incredibly
+        # performant. Using diff() and a subset of changed vertices might be better.
 
         # FORCE the viewport to reset to redraw. Shouldn't be necessary, but 
         # it seems Maya is refusing to update renders for colormaps. 
-        cmds.ogs(reset=True)
+        # cmds.ogs(reset=True)
 
     def diff(self, frame):
         """Diff against another frame and return indices that have changed
@@ -80,37 +116,35 @@ class VertexColorFrame:
         Returns:
             list: Vertex IDs that have changed
         """
-        return self.diff_vtx_list(frame.cache)
-
-    def diff_vtx_list(self, vtx_list):
-        """Diff against another vertex list and return indices that have changed
-
-        Parameters:
-            vtx_list (list): Vertex color list 
-
-        Returns:
-            list: Vertex IDs that have changed
-        """
-        indices = []
-        PRECISION = 0.0001
-
-        # A. Check for a mismatched cache length, any frames outside the common length are changed.
         
-        # B. Check for mismatched colors (with some tolerance) for common vertices
-        a = self.cache
-        b = vtx_list
+        # Vertices that are out of bounds on this 
+        # if frame.vtx_count < self.vtx_count:
+        #    oob = list(range(frame.vtx_count, self.vtx_count)
 
-        for vtx_id in range(self.vtx_count):
-            idx = vtx_id * 3
-            
-            if abs(a[idx] - b[idx]) > PRECISION or abs(a[idx + 1] - b[idx + 1]) > PRECISION or abs(a[idx + 2] - b[idx + 2]) > PRECISION:
-                indices.append(vtx_id)
+        indices = [x for x in range(self.vtx_count) if self.cache[x] == frame.cache[x]]
+
+        # TODO: Deal with different cache sizes
 
         return indices
 
+    def is_different(self, frame):
+        """Check for any changed vertex color
+
+        Parameters:
+            frame (VertexColorFrame): State to diff against
+
+        Returns:
+            bool: If any vertices have changed
+        """
+        for i in range(self.vtx_count):
+            if self.cache[i] != frame.cache[i]:
+                return True
+        
+        return False
+
     def deserialize(self, cache):
         self.cache = cache
-        self.vtx_count = int(len(cache) / 3)
+        self.vtx_count = len(self.cache)
 
     def serialize(self):
         """Return a serialized copy of this frame for caching
@@ -141,71 +175,72 @@ class VertexColorAnimator:
     # Export data that will be copied to the FBX
     ATTR_EXPORT = 'VCAExport'
 
-    def __init__(self, obj):
-        self.obj = obj
+    def __init__(self, dag_path):
+        """
+        Parameters:
+            dag_path (MDagPath): Mesh DAG path
+        """
+        # Only store the string version of the path, as Maya
+        # may deallocate memory between uses
+        self.dag_path = om.MFnDagNode(dag_path.transform()).fullPathName()
         self.frames = []
         self.prev_frame = -1
         self.prev_idx = -1
 
-        self.setup_object()
+        self.setup()
 
-    def get_attr(self, longName, dataType, defaultValue, keyable):
-        """Retrieve an attribute by longName, creating if it does not exist
+    def get_mesh(self):
+        return om.MFnMesh(dag_node(self.dag_path))
+
+    def get_attr(self, name, data_type, default_value, keyable):
+        """Retrieve an attribute by name, creating if it does not exist
 
         Parameters:
-            longName (str):
-            dataType (str)
-            defaultValue (any):
+            name (str):
+            data_type (str)
+            default_value (any):
             keyable (bool):
 
         Returns:
-            any: The attribute value, or defaultValue if it did not exist
+            any: The attribute value, or default_value if it did not exist
         """
         try:
-            value = cmds.getAttr('{}.{}'.format(self.obj, longName))
+            value = cmds.getAttr('{}.{}'.format(self.dag_path, name))
         except ValueError:
-            print(longName, dataType)
+            print(name, data_type)
 
             # TODO: Cleanup this weird workaround. Maya is complaining that it 
             # doesn't recognize the type when setting.
-            if dataType == 'string':
-                cmds.addAttr(self.obj, longName=longName, dataType=dataType, keyable=keyable)
-                cmds.setAttr('{}.{}'.format(self.obj, longName), defaultValue, type=dataType, keyable=keyable)
+            if data_type == 'string':
+                cmds.addAttr(self.dag_path, longName=name, dataType=data_type, keyable=keyable)
+                cmds.setAttr('{}.{}'.format(self.dag_path, name), default_value, type=data_type, keyable=keyable)
             else:
-                cmds.addAttr(self.obj, longName=longName, attributeType=dataType, keyable=keyable)
-                cmds.setAttr('{}.{}'.format(self.obj, longName), defaultValue, keyable=keyable)
+                cmds.addAttr(self.dag_path, longName=name, attributeType=data_type, keyable=keyable)
+                cmds.setAttr('{}.{}'.format(self.dag_path, name), default_value, keyable=keyable)
             
-            value = defaultValue
+            value = default_value
 
         return value
 
-    def setup_object(self):
-        """Setup necessary attribute defaults for the bound mesh and load cache"""
-        vci = self.get_attr(
-            longName=self.ATTR_VCI, 
-            dataType='short', 
-            defaultValue=0,
-            keyable=True
-        )
+    def set_attr(self, name, data_type, value, keyable):
+        current_value = self.get_attr(name, data_type, value, keyable)
 
-        export = self.get_attr(
-            longName=self.ATTR_EXPORT, 
-            dataType='string', 
-            defaultValue='', 
-            keyable=False
-        )
-        
+        if current_value != value:
+            if data_type == 'string':
+                cmds.setAttr('{}.{}'.format(self.dag_path, name), value, type=data_type, keyable=keyable)
+            else:
+                cmds.setAttr('{}.{}'.format(self.dag_path, name), value, keyable=keyable)
+
+    def setup(self):
+        """Setup necessary attribute defaults for the bound mesh and load cache"""
+        vci = self.get_attr(self.ATTR_VCI, 'short', 0, True)
+        export = self.get_attr(self.ATTR_EXPORT, 'string', '', False)
+
         self.load_cache()
 
     def load_cache(self):
         """Load cache data into the animator, replacing what is already setup"""
-        encoded = self.get_attr(
-            longName=self.ATTR_CACHE, 
-            dataType='string', 
-            defaultValue='[]', 
-            keyable=False
-        )
-
+        encoded = self.get_attr(self.ATTR_CACHE, 'string', '[]', False)
         cache = json.loads(encoded)
 
         self.frames = []
@@ -221,12 +256,7 @@ class VertexColorAnimator:
             cache.append(frame.serialize())
         
         encoded = json.dumps(cache)
-        cmds.setAttr(
-            '{}.{}'.format(self.obj, self.ATTR_CACHE), 
-            encoded,
-            type='string', 
-            keyable=False
-        )
+        self.set_attr(self.ATTR_CACHE, 'string', encoded, False)
 
     def on_frame_change(self, frame):
         """Event handler to change the VertexColorFrame rendered onto the mesh
@@ -237,15 +267,15 @@ class VertexColorAnimator:
         if frame == self.prev_frame:
             return
         
-        prev_frame = frame 
+        self.prev_frame = frame
 
-        idx = cmds.getAttr('{}.{}'.format(self.obj, self.ATTR_VCI))
+        idx = self.get_attr(self.ATTR_VCI, 'short', 0, True)
         if idx == self.prev_idx:
             return 
 
-        print('Transition {} to VCI {}'.format(self.obj, idx))
+        print('Transition {} to VCI {}'.format(self.dag_path, idx))
         self.prev_idx = idx
-        self.frames[idx].copy_to(self.obj)
+        self.frames[idx].copy_to(self.get_mesh())
     
     def on_export(self):
         # TODO: Big serialization work happens here. 
@@ -260,13 +290,11 @@ class VertexColorAnimator:
         vci = self.get_current_vci()
 
         new_frame = VertexColorFrame()
-        new_frame.copy_from(self.obj)
+        new_frame.copy_from(self.get_mesh())
 
         if len(self.frames) > 0:
-            changed_indices = self.frames[vci].diff(new_frame)
-            
             # If the colors of the mesh have changed, store the new VCF 
-            if len(changed_indices) > 0:
+            if self.frames[vci].is_different(new_frame):
                 self.set_keyframe(len(self.frames))
                 self.frames.append(new_frame)
                 self.update_cache()
@@ -288,7 +316,7 @@ class VertexColorAnimator:
             int: Index at the current time 
         """
         current = cmds.keyframe(
-            '{}.{}'.format(self.obj, self.ATTR_VCI), 
+            '{}.{}'.format(self.dag_path, self.ATTR_VCI), 
             query=True, 
             eval=True
         )
@@ -310,13 +338,13 @@ class VertexColorAnimator:
             vci (int): Index to keyframe
         """
         cmds.setKeyframe(
-            self.obj, 
+            self.dag_path,
             attribute=self.ATTR_VCI, 
             inTangentType='stepnext', 
             outTangentType='step'
         )
 
-        cmds.setAttr('{}.{}'.format(self.obj, self.ATTR_VCI), vci)
+        self.set_attr(self.ATTR_VCI, 'short', vci, True)
 
 
 class VertexColorAnimatorSystem:
@@ -347,8 +375,9 @@ class VertexColorAnimatorSystem:
         cmds.expression(name=name, s=expression)
 
     @classmethod
+    @safe_exceptions
     def on_frame_change(cls, frame):
-        """Delegate frame change event to all animators
+        """Delegate frame change event to *all* animators
         
         Parameters:
             frame (int): new frame number
@@ -357,56 +386,47 @@ class VertexColorAnimatorSystem:
             animator.on_frame_change(frame)
 
     @classmethod
+    @safe_exceptions
     def on_export(cls):
         """Event handler for export button
 
         Ensures all the selected objects have their export data  
         cleaned up prior to the user doing an FBX export
         """
-        animators = cls.get_animators_for_selection()
-
-        for animator in animators:
+        for animator in cls.selection_animators():
             animator.on_export()
 
     @classmethod
+    @safe_exceptions
     def on_set_key(cls):
         """Key vertex colors on all selected objects.
 
         If a selection does not have an animator setup, 
         one will be created for it.
         """
-        try:
-            animators = cls.get_animators_for_selection()
-
-            for animator in animators:
-                animator.add_key()
-        except:
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback.print_exception(exc_type, exc_value, exc_traceback,
-                                      limit=10, file=sys.stdout)   
+        for animator in cls.selection_animators():
+            animator.add_key()
 
     @classmethod
-    def get_animators_for_selection(cls):
-        """Get or create animators for each selected object
+    def selection_animators(cls):
+        """Generator for VertexColorAnimator for each selected mesh
+        
+        If a selected mesh does not have an animator setup for it,
+        one will be created automatically and tracked. If that mesh
+        has cached data associated with it, the new animator instance
+        will use that cached data.
 
         Returns:
-            list: VertexColorAnimators
+            VertexColorAnimator: for each mesh selected
         """
-        objects = cmds.ls(selection=True, objectsOnly=True)
-        # TODO: Need to ensure these are the transform nodes,
-        # as sometimes the above ls will return a shape instead.
-        selected = []
+        for dag_path in selected_meshes():
+            path = om.MFnDagNode(dag_path.transform()).fullPathName()
+            if path not in cls.animators:
+                animator = VertexColorAnimator(dag_path)
+                cls.animators[path] = animator
 
-        for obj in objects:
-            if obj in cls.animators:
-                selected.append(cls.animators[obj])
-            else:
-                animator = VertexColorAnimator(obj)
-                cls.animators[obj] = animator
-                selected.append(animator)
+            yield cls.animators[path]
 
-        return selected
-    
     @classmethod
     def open_editor(cls):
         if not cls.window:
