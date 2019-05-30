@@ -143,7 +143,7 @@ uniform bool u_CullBackfaceCreases
 <
 	string UIName = "Cull Backface Creases";
 	string UIGroup = "Outline";
-> = false;
+> = true;
 
 uniform float u_OutlineOffset
 <

@@ -1,3 +1,16 @@
+/**
+ * Maya GLSL NPR Shader 
+ *
+ * Shortlist of features:
+ * - Flat two-tone cel shading of geometry using vertex colors
+ * - Custom color blend modes for shading
+ * - Silhouette and painted (static) edge rendered using GS billboards
+ * - Controllable varying thickness for painted edges 
+ * - Custom blend modes of edge colors with the underlying vertex colors
+ * - Phong tessellation of edge billboard geometry
+ * 
+ * @author Chase McManning <cmcmanning@gmail.com>
+ */
 #version 430
 
 #include "Utility.ogsfh"
@@ -7,19 +20,12 @@
     #include "Shadows.ogsfh"
 #endif
 
-// Mode constants
-#define MODE_CREASE_0 0.0
-#define MODE_CREASE_1 0.1
-#define MODE_CREASE_2 0.2
-#define MODE_CREASE_3 0.3
-
 // Geometry group the vertex belongs to. This will later control
 // how the vertex is shaded based on our current render settings
 #define GEO_SOURCE 0 // Source geometry
 #define GEO_PAINTED_EDGE 1
 #define GEO_BBOX 2
 #define GEO_SILHOUETTE 3 
-
 
 // High values for other things (can't be packed into color.a)
 #define GEO_SOURCE 0.4
@@ -226,8 +232,27 @@ GLSLShader GSUtility
      * Determine if the edge between the two vertices is a crease
      */
     bool isCrease(int idx1, int idx2) {
-        return  cmp(gsin[idx1].data1.x, GEO_PAINTED_EDGE) && 
-                cmp(gsin[idx2].data1.x, GEO_PAINTED_EDGE);
+        // Early return if they weren't flagged as having painted edge data
+        if (!cmp(gsin[idx1].data1.x, GEO_PAINTED_EDGE) || 
+            !cmp(gsin[idx2].data1.x, GEO_PAINTED_EDGE)
+        ) {
+            return false;
+        }
+
+        // Skip if the parent edge would've been culled in screen space. 
+        // TODO: Obviously this could be optimized by putting it ANYWHERE ELSE.
+        // Doing this in the GS sucks since we're running it multiple times per vert.
+        if (u_CullBackfaceCreases) {
+            vec4 n1 = u_MVPMatrix * vec4(gsin[idx1].normal, 0);
+            vec4 n2 = u_MVPMatrix * vec4(gsin[idx2].normal, 0);
+            vec4 forward = vec4(0, 0, -1, 0);
+
+            if (dot(n1, forward) < EPSILON || dot(n2, forward) < EPSILON) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     /**
